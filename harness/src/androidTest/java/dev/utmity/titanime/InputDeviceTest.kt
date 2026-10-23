@@ -21,12 +21,8 @@ class InputDeviceTest {
             override fun onReceive(c: android.content.Context?, intent: Intent?) { connected.countDown() }
         }
         val filter = android.content.IntentFilter("dev.utmity.titanime.INPUT_READY")
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            context.registerReceiver(receiver, filter, android.content.Context.RECEIVER_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            context.registerReceiver(receiver, filter)
-        }
+        androidx.core.content.ContextCompat.registerReceiver(
+            context, receiver, filter, androidx.core.content.ContextCompat.RECEIVER_EXPORTED)
         val activity = instrumentation.startActivitySync(Intent(context, InputTestActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as InputTestActivity
         try {

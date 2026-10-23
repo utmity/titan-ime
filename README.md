@@ -39,3 +39,5 @@ Language toggle: Ctrl+Shift+J. Ctrl+Space switches Android IMEs on the tested de
 On the tested device, use -FallbackIme <enabled-other-ime-id> with -SelectTitanIme to switch away before reinstalling and reconnect Titan afterwards. The original selection is restored even on test failure. Composer regressions run as JVM unit tests; input routing runs in the separate harness app. The Debug IME sends an input-start notification only to that harness so tests can wait for an actual connection.
 
 Japanese mode passes Sym/function-modified keys through after committing pending text. Titan's observed Fn key (403 / scan 251) is tracked while held because Fn+A carries no standard modifier bit; its state is cleared on release and input lifecycle changes. No symbol mapping is supplied.
+
+Pre-review checks: run Gradle tasks :app:lintDebug :harness:lintDebug :app:assembleRelease and scripts/test-runner-cleanup.ps1. The cleanup test uses a mocked ADB function and verifies IME restoration when log collection fails. Release output is unsigned; it is not a distribution-ready package.

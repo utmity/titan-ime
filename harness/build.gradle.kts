@@ -23,6 +23,7 @@ kotlin {
 }
 
 dependencies {
+    androidTestImplementation("androidx.core:core:1.13.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("junit:junit:4.13.2")
 }

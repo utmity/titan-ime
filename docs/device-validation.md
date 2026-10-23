@@ -97,3 +97,10 @@ Linux TitanKey timestamps 40629.849152–40648.563908 and Android logs 05:54:48�
 Reading only the test EditText through UI Automator after Enter returned `aaか\n`. This confirms actual physical Japanese-mode Sym/Fn pass-through, release recovery into romaji conversion, and Enter commitment/newline in this editor. The preparation mode toggle and initial empty-field check were injected events, separate from the user-operated sequence.
 
 Capture stopped; default IME restored to the pre-test PhysiBoard dev3. No source change was needed after this physical test. Pending-composition-plus-modifier cases remain covered by injection regressions; they were not repeated physically. Other editors, other Fn chords and lost-key-up behavior remain outside this verification.
+
+## PR finishing checks — 2026-10-24
+
+- `:app:lintDebug :harness:lintDebug :app:assembleRelease`: PASS after replacing the test receiver registration branches with ContextCompat.registerReceiver and an explicit exported flag (the sender is the separate IME app).
+- Lint warnings remain for prototype metadata/backup rules, available dependency updates and diagnostic UI text; no lint errors. Release output is `app-release-unsigned.apk`: build-verified only, not signed for distribution or installed on the device.
+- Fixed runner cleanup: a failed logcat collection now emits a warning instead of skipping IME restoration. Offline `scripts/test-runner-cleanup.ps1` mocks ADB and verifies restoration with both successful and failed instrumentation while logcat fails; PASS. It does not access a device.
+- Rebuilt/reinstalled and reran the complete device regression after the receiver change: `OK (1 test)`, 6.357 seconds. The runner restored PhysiBoard dev3 successfully.

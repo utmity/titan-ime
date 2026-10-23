@@ -51,7 +51,11 @@ try {
         RunTest 'dev.utmity.titanime.harness.test' 'input-sequence'
     }
 } finally {
-    Adb logcat -d -s TitanKeyProbe:I TitanImeProbe:I AndroidRuntime:E '*:S' | Set-Content "$output/logcat.txt"
+    try {
+        Adb logcat -d -s TitanKeyProbe:I TitanImeProbe:I AndroidRuntime:E '*:S' | Set-Content "$output/logcat.txt"
+    } catch {
+        Write-Warning "Could not collect logcat: $_"
+    }
     if ($SelectTitanIme) { Adb shell ime set $before }
     $after = ((Adb shell settings get secure default_input_method) -join '').Trim()
     $afterEnabled = (Adb shell settings get secure enabled_input_methods) -join "`n"
