@@ -71,6 +71,38 @@ class InputDeviceTest {
             key(KeyEvent.KEYCODE_N); expect("か\nn", true)
             key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON); expect("か\nん", false)
             key(KeyEvent.KEYCODE_B); expect("か\nんb", false)
+            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
+            // Synthetic regression using the modifier observed on physical Sym+A.
+            key(KeyEvent.KEYCODE_A, KeyEvent.META_SYM_ON); expect("か\nんba", false)
+            // Reproduce Titan's vendor Fn down/A/up sequence; this is not a physical press.
+            fun vendorFn(action: Int) {
+                instrumentation.sendKeySync(KeyEvent(0, 0, action, 403, 0, 0, 0, 251))
+                instrumentation.waitForIdleSync()
+                Thread.sleep(100)
+            }
+            vendorFn(KeyEvent.ACTION_DOWN)
+            try {
+                key(KeyEvent.KEYCODE_A); expect("か\nんbaa", false)
+            } finally {
+                vendorFn(KeyEvent.ACTION_UP)
+            }
+            key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A); expect("か\nんbaaか", true)
+            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
+            expect("か\nんbaaか", false)
+            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
+            key(KeyEvent.KEYCODE_N)
+            key(KeyEvent.KEYCODE_A, KeyEvent.META_SYM_ON); expect("か\nんbaaかんa", false)
+            key(KeyEvent.KEYCODE_K)
+            vendorFn(KeyEvent.ACTION_DOWN)
+            try {
+                key(KeyEvent.KEYCODE_A); expect("か\nんbaaかんaka", false)
+            } finally {
+                vendorFn(KeyEvent.ACTION_UP)
+            }
+            key(KeyEvent.KEYCODE_A, KeyEvent.META_FUNCTION_ON); expect("か\nんbaaかんakaa", false)
+            key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A); expect("か\nんbaaかんakaaか", true)
+            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
+            expect("か\nんbaaかんakaaか", false)
         } finally {
             context.unregisterReceiver(receiver)
             instrumentation.runOnMainSync { activity.finish() }

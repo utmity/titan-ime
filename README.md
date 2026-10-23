@@ -37,3 +37,5 @@ See [device validation](docs/device-validation.md) for observed results and rema
 Language toggle: Ctrl+Shift+J. Ctrl+Space switches Android IMEs on the tested device and must not be used for the internal toggle.
 
 On the tested device, use -FallbackIme <enabled-other-ime-id> with -SelectTitanIme to switch away before reinstalling and reconnect Titan afterwards. The original selection is restored even on test failure. Composer regressions run as JVM unit tests; input routing runs in the separate harness app. The Debug IME sends an input-start notification only to that harness so tests can wait for an actual connection.
+
+Japanese mode passes Sym/function-modified keys through after committing pending text. Titan's observed Fn key (403 / scan 251) is tracked while held because Fn+A carries no standard modifier bit; its state is cleared on release and input lifecycle changes. No symbol mapping is supplied.

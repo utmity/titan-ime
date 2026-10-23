@@ -75,3 +75,15 @@ SDK definitions identify meta=4 as META_SYM_ON; META_FUNCTION_ON is 8 and was no
 All down events reached TitanImeService with japanese=false and connected=true, and both down/up events reached the harness activity. This verifies English-mode pass-through for this sequence. It does not establish Japanese-mode Sym/Fn semantics, the produced characters, other Fn chords, long presses or repeat behavior. Future Fn support needs the observed key's own press/release state (or further device mapping evidence), not only META_FUNCTION_ON. No Fn remapping is introduced by this PR.
 
 Capture was stopped after collecting the sequence. Default IME remains Titan; previously enabled PhysiBoard, the original keyboard service and FluxKeyboard remain enabled.
+
+## Japanese modifier routing follow-up — 2026-10-24
+
+A new synthetic regression on the real device reproduced Sym+A being converted to あ in Japanese mode. The expected policy is to pass modified keys through, not feed them into romaji composition. The test uses META_SYM_ON and the previously observed vendor Fn keyCode=403/scanCode=251 down/A/up sequence; it is not a second physical capture.
+
+The IME now bypasses romaji for Sym, standard META_FUNCTION_ON, and a held vendor Fn identified by that exact key/scan pair. Vendor Fn state is tracked per device ID, released on key-up and cleared on input lifecycle changes. No symbol/numeric key mapping is invented; events are forwarded to the editor/system.
+
+Pending composition is committed before modified input. An expanded device test also exposed a cursor/order race when commitText was followed by normal key fallthrough: subsequent text was inserted before the modified letter. Routing that key through the same InputConnection after committing fixed the observed sequence.
+
+Final build/install/select/test/restore pipeline: PASS, `OK (1 test)`, 6.420 seconds. The existing input sequence plus Japanese Sym+A, vendor Fn+A, Fn-release recovery, pending n followed by Sym+A, pending k followed by Fn+A, and standard function-modified A all passed. Composer JVM regressions passed as part of the build. The run restored its initial default, PhysiBoard dev3.
+
+Physical Japanese-mode Sym/Fn presses and other editors remain unverified. The earlier physical capture established the mapping in English mode only. A lost Fn-up without an input lifecycle transition is not separately tested.
