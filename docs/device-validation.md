@@ -87,3 +87,13 @@ Pending composition is committed before modified input. An expanded device test 
 Final build/install/select/test/restore pipeline: PASS, `OK (1 test)`, 6.420 seconds. The existing input sequence plus Japanese Sym+A, vendor Fn+A, Fn-release recovery, pending n followed by Sym+A, pending k followed by Fn+A, and standard function-modified A all passed. Composer JVM regressions passed as part of the build. The run restored its initial default, PhysiBoard dev3.
 
 Physical Japanese-mode Sym/Fn presses and other editors remain unverified. The earlier physical capture established the mapping in English mode only. A lost Fn-up without an input lifecycle transition is not separately tested.
+
+## Japanese-mode physical verification — 2026-10-24
+
+PASS on commit a3a9d0e: the user physically pressed Sym+A, released both keys, pressed Fn+A, released both keys, then K, A, Enter. The harness was empty and the IME diagnostic probe confirmed japanese=true before and throughout this sequence.
+
+Linux TitanKey timestamps 40629.849152–40648.563908 and Android logs 05:54:48–05:55:07 JST matched all requested operations. Sym+A reached the editor with keyCode=29, scanCode=30, meta=4; Fn+A reached it with the same key/scan and meta=0, following vendor Fn=403/251. DeviceId=0 identifies physical events. K used scanCode=37; Enter used scanCode=28. Normal K/A down events were consumed by the Japanese composer after Fn release.
+
+Reading only the test EditText through UI Automator after Enter returned `aaか\n`. This confirms actual physical Japanese-mode Sym/Fn pass-through, release recovery into romaji conversion, and Enter commitment/newline in this editor. The preparation mode toggle and initial empty-field check were injected events, separate from the user-operated sequence.
+
+Capture stopped; default IME restored to the pre-test PhysiBoard dev3. No source change was needed after this physical test. Pending-composition-plus-modifier cases remain covered by injection regressions; they were not repeated physically. Other editors, other Fn chords and lost-key-up behavior remain outside this verification.
