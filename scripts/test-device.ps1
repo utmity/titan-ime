@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$Serial,
-    [switch]$InputSequence
+    [switch]$InputSequence,
+    [switch]$SkipInstall
 )
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
@@ -19,8 +20,13 @@ $output = Join-Path 'test-results' (Get-Date -Format 'yyyyMMdd-HHmmss')
 New-Item -ItemType Directory -Force $output | Out-Null
 & .\gradlew.bat :app:assembleDebug :app:assembleDebugAndroidTest --console=plain 2>&1 | Tee-Object "$output/build.log"
 if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
-Adb install -r app/build/outputs/apk/debug/app-debug.apk
-Adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+if (-not $SkipInstall) {
+    Adb install -r app/build/outputs/apk/debug/app-debug.apk
+    Adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+}
+if ($InputSequence -and ((Adb shell settings get secure default_input_method) -join '').Trim() -ne 'dev.utmity.titanime/.TitanImeService') {
+    throw 'Android changed the selected IME during installation. Select Titan IME manually and rerun with -InputSequence -SkipInstall.'
+}
 try {
     Adb shell ime list -a -s | Set-Content "$output/ime-registration.txt"
     Adb shell getevent -lp | Set-Content "$output/input-capabilities.txt"

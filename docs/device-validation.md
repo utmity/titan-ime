@@ -56,3 +56,10 @@ $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 The script checks the selected IME before input injection and fails without switching it. It writes build output, instrumentation output, capability metadata and filtered logs to ignored `test-results/`. Raw device serials and other-app logs are deliberately not committed here.
 
 Automation verification: the PowerShell runner completed build/install/composer/log collection successfully. Running with -InputSequence while the original IME remained selected exited before build or input injection, with the expected manual-selection message.
+
+## Follow-up after user selection
+
+The user selected Titan IME and ADB confirmed it before the full runner started.
+The run rebuilt/reinstalled the APKs, passed the editor's English `a` and deletion assertions, then failed the composing-span assertion for `k` after Ctrl+Space. The selected IME at the end was the original keyboard service, not Titan IME. Therefore these editor assertions do not establish that Titan IME handled English input. The existing trace cannot distinguish installation-triggered fallback from shortcut-triggered switching. No automatic restoration was attempted.
+
+Added a post-install selection guard, per-key selection checks and `-SkipInstall` to separate installation from input routing. Rebuilt and installed the guard changes; composer instrumentation passed again. Awaiting manual reselection for an input-only run. Use `-InputSequence -SkipInstall` after selection. SkipInstall tests the already installed APKs; it does not deploy newly built changes.

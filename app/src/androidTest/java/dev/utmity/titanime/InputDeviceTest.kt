@@ -22,14 +22,19 @@ class InputDeviceTest {
             instrumentation.waitForIdleSync()
             Thread.sleep(800)
             fun key(code: Int, meta: Int = 0) {
+                assertEquals("IME changed; abort input injection", "dev.utmity.titanime/.TitanImeService",
+                    Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD))
                 instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, code, 0, meta))
                 instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_UP, code, 0, meta))
                 instrumentation.waitForIdleSync()
+                Thread.sleep(100)
+                assertEquals("IME changed after key $code", "dev.utmity.titanime/.TitanImeService",
+                    Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD))
             }
             fun expect(text: String, composing: Boolean) {
                 instrumentation.runOnMainSync {
                     assertEquals(text, activity.editor.text.toString())
-                    assertEquals(composing, BaseInputConnection.getComposingSpanStart(activity.editor.text) >= 0)
+                    assertEquals("Composing span for '$text'", composing, BaseInputConnection.getComposingSpanStart(activity.editor.text) >= 0)
                 }
             }
             key(KeyEvent.KEYCODE_A); expect("a", false)
