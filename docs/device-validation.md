@@ -53,3 +53,7 @@ PASS: the final runner built the APKs, passed the JVM composer regressions, temp
 Composer tests were initially executed on the device to reproduce the bug, then moved to JVM tests so running them no longer instruments/restarts the IME package. Device input tests remain separate and exercise the real service and InputConnection.
 
 On this device, reinstalling while Titan remained selected sometimes left its service disconnected despite the selection setting. An explicit `-FallbackIme` before installation resolved this in the final end-to-end run. The fallback must already be enabled and requires `-SelectTitanIme`; the script never chooses an unknown fallback itself. One stalled Android package-install session was explicitly abandoned and retried successfully; no package or security setting was removed/disabled.
+
+## 2026-10-24 resume
+
+USB device remained connected. Titan was installed/registered but absent from enabled_input_methods, and `ime set` returned `Unknown input method`. After the user's authorization to manage default-IME switching, Titan alone was re-enabled and selected for continued testing. Other enabled IMEs were retained. The runner still does not enable/disable IMEs automatically. Physical TitanKey capture was started for labeled user presses; this is not yet a mapping result.
