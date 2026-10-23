@@ -29,6 +29,11 @@ class TitanImeService : InputMethodService() {
         super.onStartInput(attribute, restarting)
         composer.clear()
         refreshStrip()
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
+            attribute?.packageName == "dev.utmity.titanime.harness") {
+            sendBroadcast(android.content.Intent("dev.utmity.titanime.INPUT_READY")
+                .setPackage("dev.utmity.titanime.harness"))
+        }
     }
 
     private fun refreshStrip() {
@@ -49,6 +54,10 @@ class TitanImeService : InputMethodService() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
+            currentInputEditorInfo?.packageName == "dev.utmity.titanime.harness") {
+            android.util.Log.i("TitanImeProbe", "key=$keyCode meta=${event.metaState} japanese=$japanese connected=${currentInputConnection != null}")
+        }
         val ic = currentInputConnection ?: return super.onKeyDown(keyCode, event)
         if (keyCode == KeyEvent.KEYCODE_J && event.isCtrlPressed && event.isShiftPressed &&
             !event.isAltPressed && !event.isMetaPressed) {

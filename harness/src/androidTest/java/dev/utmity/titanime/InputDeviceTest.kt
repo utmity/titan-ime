@@ -16,11 +16,35 @@ class InputDeviceTest {
         assertEquals("Select Titan IME manually before running this test",
             "dev.utmity.titanime/.TitanImeService",
             Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD))
+        val connected = java.util.concurrent.CountDownLatch(1)
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: android.content.Context?, intent: Intent?) { connected.countDown() }
+        }
+        val filter = android.content.IntentFilter("dev.utmity.titanime.INPUT_READY")
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            context.registerReceiver(receiver, filter, android.content.Context.RECEIVER_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            context.registerReceiver(receiver, filter)
+        }
         val activity = instrumentation.startActivitySync(Intent(context, InputTestActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as InputTestActivity
         try {
             instrumentation.waitForIdleSync()
-            Thread.sleep(800)
+            var ready = false
+            val deadline = android.os.SystemClock.uptimeMillis() + 10000
+            while (!ready && android.os.SystemClock.uptimeMillis() < deadline) {
+                instrumentation.runOnMainSync {
+                    if (activity.editor.hasWindowFocus()) {
+                        activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                            .showSoftInput(activity.editor, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                        ready = connected.count == 0L
+                    }
+                }
+                Thread.sleep(100)
+            }
+            org.junit.Assert.assertTrue("Input connection not ready for the focused test editor", ready)
+            Thread.sleep(1000)
             fun key(code: Int, meta: Int = 0) {
                 assertEquals("IME changed; abort input injection", "dev.utmity.titanime/.TitanImeService",
                     Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD))
@@ -48,24 +72,9 @@ class InputDeviceTest {
             key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON); expect("か\nん", false)
             key(KeyEvent.KEYCODE_B); expect("か\nんb", false)
         } finally {
+            context.unregisterReceiver(receiver)
             instrumentation.runOnMainSync { activity.finish() }
         }
     }
 
-    @Test fun testComposer() {
-        val composer = RomajiComposer()
-        "konnichiha".forEach(composer::type)
-        assertEquals("こんにちは", composer.text())
-        composer.clear()
-        "kitte".forEach(composer::type)
-        assertEquals("きって", composer.text())
-        composer.clear(); composer.type('n'); composer.flush()
-        assertEquals("ん", composer.text())
-        for ((input, expected) in mapOf("nn" to "ん", "nna" to "んな", "nnka" to "んか", "kanna" to "かんな")) {
-            composer.clear()
-            input.forEach(composer::type)
-            composer.flush()
-            assertEquals(input, expected, composer.text())
-        }
-    }
 }

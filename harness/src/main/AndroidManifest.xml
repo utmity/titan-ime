@@ -1,0 +1,1 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:label="Titan IME Test" android:allowBackup="false"><activity android:name="dev.utmity.titanime.InputTestActivity" android:exported="true" /></application></manifest>

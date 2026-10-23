@@ -1,71 +1,55 @@
 # Device validation — 2026-10-23 (JST)
 
-## Baseline and environment
+## Environment
 
-- Remote `origin/main` and initial local HEAD: `1da9d397663e947894b305941e95cc72fc810cec`.
-- Work branch: `codex/device-test-harness`.
-- USB ADB reports `device`; Android reports model `Titan 2`, product/device `Titan_2`, Android 16. The user's name for the device is T2E; the reported model alone does not verify an Elite variant.
-- Java: Microsoft OpenJDK 17.0.20.1; Gradle: 8.9; Android Gradle Plugin: 8.7.3; Kotlin: 2.0.21.
-- ADB: 37.0.1. SDK platform 35 was missing and installed by Gradle using the already accepted SDK license.
-- ADB/network initially failed in the sandbox; the same operations succeeded with approved host execution.
-- SDK XML version warning was non-fatal. Both APK builds completed successfully.
+Baseline remote/local HEAD: `1da9d397663e947894b305941e95cc72fc810cec`.
+Branch: `codex/device-test-harness`.
+USB ADB reports `device`; model `Titan 2`, product/device `Titan_2`, Android 16. These values do not independently verify the user's Elite variant designation.
+Java 17.0.20.1, Gradle 8.9, AGP 8.7.3, Kotlin 2.0.21, ADB 37.0.1. SDK 35 was installed using an existing accepted SDK license. SDK XML warning was non-fatal.
 
-## IME preservation
+## Results and fixes
 
-Initial/default IME: `com.iqqijni.bbkeyboard/.keyboard_service.view.HDKeyboardService`.
-Enabled entries initially included PhysiBoard dev3, that keyboard service, and FluxKeyboard.
-Titan IME was absent before installation and present in `ime list -a -s` afterwards.
-No IME was enabled, disabled, selected or uninstalled by this work. No USB debugging settings changed.
-The default remained unchanged after installation and the composer test.
+- Composer instrumentation initially failed: `konnichiha` produced `こんいちは`. Deferred nn resolution fixed this; greeting, doubled consonant, final n and nn/nna/nnka/kanna regressions pass on the device.
+- Ctrl+Space changed the default Android IME. Reproduced in an input-only run, excluding reinstall as a necessary cause. The per-key selection guard stopped further input. Replaced internal toggle with Ctrl+Shift+J.
+- Input tests now run in separate package `dev.utmity.titanime.harness`, avoiding instrumentation of the selected IME's package. Tests wait for focused editor and the Debug IME onStartInput notification, explicitly request IME input and allow connection delivery to settle. Soft IME visibility alone was not a valid readiness condition on this hardware-keyboard device.
+- A final standalone harness run passed English `a`, deletion, EN→JA, pending `k`, deleting the last composing character, `ka`→`か` with composing span, Enter→`か\n` with no composing span, pending `n`, JA→EN committing `ん`, and English `b`. IME diagnostic logs confirmed key delivery and both mode changes.
+- Backspace now replaces composing text with empty text before finishing composition. The last-character deletion assertion passed through the actual InputConnection.
 
-## Evidence and scope
+These are injected Android key events on the physical device, not physical keyboard presses. No claim is made about arbitrary editors, passwords, cursor movement, Japanese conversion candidates, or all romaji spellings.
 
-| Check | Observed result |
-| --- | --- |
-| Debug APK + instrumentation APK build/install | Successful, including rebuild/reinstall after fixes |
-| Composer instrumentation on physical device, before fix | FAIL: `konnichiha` expected `こんにちは`, actual `こんいちは` |
-| Composer instrumentation on physical device, after fix | `OK (1 test)`; greeting, doubled consonant, final n, nn/nna/nnka/kanna cases |
-| English, Japanese composition, Backspace, Enter, Ctrl+Space through selected IME | Pending user selection of Titan IME; test implemented, not claimed passed |
-| Delete final composing character | Code inspection found finishComposingText alone leaves text behind; changed to replace with empty composing text first. Real IME regression remains pending |
-| Sym/Fn physical presses | Pending labeled manual presses; no mapping inferred from injected events |
+## IME settings
 
-The composer test runs Kotlin logic inside Android instrumentation on the actual device. It does **not** exercise InputMethodService or the editor connection.
-The input sequence must start with Titan IME in English mode, an unlocked screen, and the test editor focused. Its successful path returns to English. A failed run may leave Japanese mode active; check/reset with Ctrl+Shift+J manually before retrying.
-Ctrl+Space was subsequently observed to switch the selected Android IME; the current internal shortcut is Ctrl+Shift+J.
+Initial default: `com.iqqijni.bbkeyboard/.keyboard_service.view.HDKeyboardService`.
+PhysiBoard dev3, this service and FluxKeyboard were enabled initially. Titan IME was registered by APK installation, then enabled/selected manually by the user.
+The user subsequently authorized automated default-IME changes. `-SelectTitanIme` now explicitly selects the already-enabled Titan IME and restores the selection recorded at run start in a finally block. No enable/disable/uninstall commands or USB-debugging setting changes are used. Current test baseline is Titan IME itself.
 
-## Hardware observations
+## Hardware evidence
 
-`adb shell getevent -lp` identified `/dev/input/event5` named `TitanKey`.
-Advertised Linux keys include letters, BACKSPACE, ENTER, RIGHTSHIFT, LEFTALT, SPACE, F1, F10, F11, F13, arrows and vendor codes `00fb`/`00fd`.
-These are capability declarations, **not observed press mappings**; event numbers may change after reboot.
-Other devices include `touchPad`, `fts_ts`, `ff_key` and `mtk-pmic-keys`.
-The Debug editor displays/logs Android keyCode, scanCode, metaState, action, repeat count and device ID. IME/system-consumed events may not reach it.
-For Sym/Fn, correlate a labeled physical sequence with `getevent -lt` and the probe log. Do not substitute `adb input keyevent` for hardware evidence.
+`getevent -lp` reports `/dev/input/event5` named `TitanKey`; event numbers may change after reboot. Advertised Linux capabilities include letters, BACKSPACE, ENTER, RIGHTSHIFT, LEFTALT, SPACE, F1/F10/F11/F13, arrows, vendor codes `00fb`/`00fd`. These are capabilities, not observed mappings for labeled physical keys.
 
-Logcat inspection contained an older WebView sandbox crash from another package; no causal connection to Titan IME was established. No TitanKeyProbe presses had been recorded at that inspection.
+Injected events observed by the IME: A=29, J=38, K=39, N=42, B=30, DEL=67, ENTER=66; Ctrl+Shift meta=4097. ScanCode=0/device=-1 identifies these as synthetic, not hardware evidence.
+
+Sym/Fn and physical scan-code mapping remain pending labeled user presses. An initial getevent observation window contained no presses and was stopped. The probe logs key metadata, not editor contents; metadata can still reveal keys, so use only test input. IME-side probe logging is restricted to debuggable builds and the harness editor package. The harness activity probe is confined to that app.
 
 ## Reproduce
 
 ```powershell
 $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
-.\scripts\test-device.ps1 -Serial <serial>
-# Manually enable/select Titan IME, start in English mode, then:
-.\scripts\test-device.ps1 -Serial <serial> -InputSequence
+.\scripts\test-device.ps1 -Serial <serial> -InputSequence -SelectTitanIme -FallbackIme <enabled-other-ime-id>
+# Existing APKs only:
+.\scripts\test-device.ps1 -Serial <serial> -InputSequence -SelectTitanIme -FallbackIme <enabled-other-ime-id> -SkipInstall
 ```
 
-The script checks the selected IME before input injection and fails without switching it. It writes build output, instrumentation output, capability metadata and filtered logs to ignored `test-results/`. Raw device serials and other-app logs are deliberately not committed here.
+Start in English mode with screen unlocked. A successful sequence returns to English; a failed sequence may leave internal mode in Japanese. The run saves build output, JVM composer test build output/input results, key capabilities and filtered logs in ignored `test-results/`. Raw serials and other-app logs are not committed.
 
-Automation verification: the PowerShell runner completed build/install/composer/log collection successfully. Running with -InputSequence while the original IME remained selected exited before build or input injection, with the expected manual-selection message.
+Open the physical-key test editor with:
+`adb shell am start -n dev.utmity.titanime.harness/dev.utmity.titanime.InputTestActivity`.
+Correlate labeled presses with `adb shell getevent -lt` and `TitanKeyProbe`/`TitanImeProbe` logs. System-consumed keys may not reach the activity. A previous unrelated WebView crash in logcat was not attributed to Titan IME.
 
-## Follow-up after user selection
+## Final pipeline result
 
-The user selected Titan IME and ADB confirmed it before the full runner started.
-The run rebuilt/reinstalled the APKs, passed the editor's English `a` and deletion assertions, then failed the composing-span assertion for `k` after Ctrl+Space. The selected IME at the end was the original keyboard service, not Titan IME. Therefore these editor assertions do not establish that Titan IME handled English input. The existing trace cannot distinguish installation-triggered fallback from shortcut-triggered switching. No automatic restoration was attempted.
+PASS: the final runner built the APKs, passed the JVM composer regressions, temporarily selected the already-enabled original keyboard service, installed the IME/harness/harness-test APKs, selected Titan, received its input-start notification, and passed `OK (1 test)` for the full input sequence. It restored the run-start selection (Titan) without an enabled/default mismatch warning.
 
-Added a post-install selection guard, per-key selection checks and `-SkipInstall` to separate installation from input routing. Rebuilt and installed the guard changes; composer instrumentation passed again. Awaiting manual reselection for an input-only run. Use `-InputSequence -SkipInstall` after selection. SkipInstall tests the already installed APKs; it does not deploy newly built changes.
+Composer tests were initially executed on the device to reproduce the bug, then moved to JVM tests so running them no longer instruments/restarts the IME package. Device input tests remain separate and exercise the real service and InputConnection.
 
-## Input-only run: shortcut conflict reproduced
-
-After the user reselected Titan IME, the `-InputSequence -SkipInstall` run confirmed Titan selection before input. English `a` and Backspace assertions passed with Titan still selected. Immediately after Ctrl+Space (keyCode 62, CTRL meta), the per-key guard detected selection of the original keyboard service and stopped before sending `k`. This reproduces the switching without any APK installation in the run. The composer test passed independently.
-
-Changed the internal language shortcut to Ctrl+Shift+J, ignoring repeat key-downs to avoid repeated toggling. Updated instrumentation to use it, rebuilt/reinstalled both APKs, and passed composer instrumentation again. Selected-IME routing with the new shortcut is pending manual reselection; it is not yet claimed successful. Physical Sym/Fn mappings remain pending.
+On this device, reinstalling while Titan remained selected sometimes left its service disconnected despite the selection setting. An explicit `-FallbackIme` before installation resolved this in the final end-to-end run. The fallback must already be enabled and requires `-SelectTitanIme`; the script never chooses an unknown fallback itself. One stalled Android package-install session was explicitly abandoned and retried successfully; no package or security setting was removed/disabled.

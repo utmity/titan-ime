@@ -17,21 +17,23 @@ Physical-keyboard-first Android IME for Unihertz Titan 2 Elite.
 ## Reference
 PhysiBoard (https://github.com/brobata/physiboard) is a GPL-3.0 clean-room rewrite with pure Kotlin core modules. Any reuse of its source requires license compliance; this project currently contains no PhysiBoard code.
 
-Status: installable prototype with a Debug-only editor and device instrumentation tests.
+Status: installable prototype with a separate test-editor app and device instrumentation tests.
 
 ## Device development (Windows)
 Set `ANDROID_HOME` to the Android SDK directory and use JDK 17.
-`./gradlew.bat :app:assembleDebug :app:assembleDebugAndroidTest` uses Gradle 8.9.
+The Gradle 8.9 wrapper builds the IME (`app`) and separate editor (`harness`).
 Run `./scripts/test-device.ps1 -Serial <adb-serial>` for build, install and composer checks.
-Add `-InputSequence` only after manually enabling and selecting Titan IME on the device.
-The script never enables, disables or selects an IME. It never uninstalls packages.
+Add `-InputSequence -SelectTitanIme` to explicitly select an already enabled Titan IME for the test and restore the previous selection in finally. Without `-SelectTitanIme`, select Titan IME manually.
+The script never enables/disables IMEs or uninstalls packages. `-SkipInstall` tests installed APKs without building or installing.
 Results are saved under ignored `test-results/`; inspect before sharing logs.
 
-Open the isolated editor with `adb -s <adb-serial> shell am start -n dev.utmity.titanime/.InputTestActivity`.
-Its Debug-only key probe records action, keyCode, scanCode, metaState and deviceId, not editor text.
+Open the isolated editor with `adb -s <adb-serial> shell am start -n dev.utmity.titanime.harness/dev.utmity.titanime.InputTestActivity`.
+Its key probe records action, keyCode, scanCode, metaState and deviceId, not editor text.
 Keys consumed by an IME or Android may not reach the activity; absent events do not prove absent hardware keys.
 `adb shell getevent -lt` can supplement the probe while manually pressing known keys; stop with Ctrl+C.
 Injected key events test Android input routing, not physical Sym/Fn mappings.
 See [device validation](docs/device-validation.md) for observed results and remaining checks.
 
 Language toggle: Ctrl+Shift+J. Ctrl+Space switches Android IMEs on the tested device and must not be used for the internal toggle.
+
+On the tested device, use -FallbackIme <enabled-other-ime-id> with -SelectTitanIme to switch away before reinstalling and reconnect Titan afterwards. The original selection is restored even on test failure. Composer regressions run as JVM unit tests; input routing runs in the separate harness app. The Debug IME sends an input-start notification only to that harness so tests can wait for an actual connection.
