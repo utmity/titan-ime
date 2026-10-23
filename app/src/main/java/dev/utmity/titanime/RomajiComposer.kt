@@ -44,6 +44,13 @@ class RomajiComposer {
 
     private fun resolve() {
         while (pending.isNotEmpty()) {
+            // Defer nn until the following letter distinguishes nni from nn+k.
+            if (pending == "nn") return
+            if (pending.startsWith("nn") && pending.length > 2) {
+                composed += "ん"
+                pending = pending.drop(if (pending[2] in "aiueoy") 1 else 2)
+                continue
+            }
             if (pending.length >= 2 && pending[0] == pending[1] &&
                 pending[0] in consonants && pending[0] != 'n') {
                 composed += "っ"
@@ -79,7 +86,7 @@ class RomajiComposer {
     }
 
     fun flush() {
-        if (pending == "n") composed += "ん"
+        if (pending == "n" || pending == "nn") composed += "ん"
         else composed += pending
         pending = ""
     }

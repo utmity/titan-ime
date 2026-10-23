@@ -63,8 +63,8 @@ class TitanImeService : InputMethodService() {
             KeyEvent.KEYCODE_DEL -> {
                 if (composer.text().isNotEmpty()) {
                     composer.backspace()
+                    replaceComposing(ic)
                     if (composer.text().isEmpty()) ic.finishComposingText()
-                    else replaceComposing(ic)
                     refreshStrip()
                     return true
                 }
