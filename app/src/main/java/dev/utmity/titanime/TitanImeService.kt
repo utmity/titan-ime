@@ -8,8 +8,8 @@ import android.widget.TextView
 
 /**
  * Prototype physical-keyboard IME.
- * Ctrl+Space toggles language internally; this shortcut may be intercepted by
- * Android before delivery on some devices, so hardware testing is required.
+ * Ctrl+Shift+J toggles language internally. Ctrl+Space is reserved by Android
+ * for switching input methods on the tested Titan device.
  */
 class TitanImeService : InputMethodService() {
     private val composer = RomajiComposer()
@@ -50,7 +50,9 @@ class TitanImeService : InputMethodService() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val ic = currentInputConnection ?: return super.onKeyDown(keyCode, event)
-        if (keyCode == KeyEvent.KEYCODE_SPACE && event.isCtrlPressed) {
+        if (keyCode == KeyEvent.KEYCODE_J && event.isCtrlPressed && event.isShiftPressed &&
+            !event.isAltPressed && !event.isMetaPressed) {
+            if (event.repeatCount > 0) return true
             if (japanese) commitComposition(ic)
             japanese = !japanese
             refreshStrip()

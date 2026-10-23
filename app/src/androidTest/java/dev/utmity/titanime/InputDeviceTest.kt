@@ -39,13 +39,13 @@ class InputDeviceTest {
             }
             key(KeyEvent.KEYCODE_A); expect("a", false)
             key(KeyEvent.KEYCODE_DEL); expect("", false)
-            key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_CTRL_ON)
+            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
             key(KeyEvent.KEYCODE_K); expect("k", true)
             key(KeyEvent.KEYCODE_DEL); expect("", false)
             key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A); expect("か", true)
             key(KeyEvent.KEYCODE_ENTER); expect("か\n", false)
             key(KeyEvent.KEYCODE_N); expect("か\nn", true)
-            key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_CTRL_ON); expect("か\nん", false)
+            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON); expect("か\nん", false)
             key(KeyEvent.KEYCODE_B); expect("か\nんb", false)
         } finally {
             instrumentation.runOnMainSync { activity.finish() }

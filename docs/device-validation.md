@@ -30,8 +30,8 @@ The default remained unchanged after installation and the composer test.
 | Sym/Fn physical presses | Pending labeled manual presses; no mapping inferred from injected events |
 
 The composer test runs Kotlin logic inside Android instrumentation on the actual device. It does **not** exercise InputMethodService or the editor connection.
-The input sequence must start with Titan IME in English mode, an unlocked screen, and the test editor focused. Its successful path returns to English. A failed run may leave Japanese mode active; check/reset with Ctrl+Space manually before retrying.
-Ctrl+Space can be intercepted by Android. Failure here must be investigated rather than treated as proof of a composer defect.
+The input sequence must start with Titan IME in English mode, an unlocked screen, and the test editor focused. Its successful path returns to English. A failed run may leave Japanese mode active; check/reset with Ctrl+Shift+J manually before retrying.
+Ctrl+Space was subsequently observed to switch the selected Android IME; the current internal shortcut is Ctrl+Shift+J.
 
 ## Hardware observations
 
@@ -63,3 +63,9 @@ The user selected Titan IME and ADB confirmed it before the full runner started.
 The run rebuilt/reinstalled the APKs, passed the editor's English `a` and deletion assertions, then failed the composing-span assertion for `k` after Ctrl+Space. The selected IME at the end was the original keyboard service, not Titan IME. Therefore these editor assertions do not establish that Titan IME handled English input. The existing trace cannot distinguish installation-triggered fallback from shortcut-triggered switching. No automatic restoration was attempted.
 
 Added a post-install selection guard, per-key selection checks and `-SkipInstall` to separate installation from input routing. Rebuilt and installed the guard changes; composer instrumentation passed again. Awaiting manual reselection for an input-only run. Use `-InputSequence -SkipInstall` after selection. SkipInstall tests the already installed APKs; it does not deploy newly built changes.
+
+## Input-only run: shortcut conflict reproduced
+
+After the user reselected Titan IME, the `-InputSequence -SkipInstall` run confirmed Titan selection before input. English `a` and Backspace assertions passed with Titan still selected. Immediately after Ctrl+Space (keyCode 62, CTRL meta), the per-key guard detected selection of the original keyboard service and stopped before sending `k`. This reproduces the switching without any APK installation in the run. The composer test passed independently.
+
+Changed the internal language shortcut to Ctrl+Shift+J, ignoring repeat key-downs to avoid repeated toggling. Updated instrumentation to use it, rebuilt/reinstalled both APKs, and passed composer instrumentation again. Selected-IME routing with the new shortcut is pending manual reselection; it is not yet claimed successful. Physical Sym/Fn mappings remain pending.

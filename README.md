@@ -33,3 +33,5 @@ Keys consumed by an IME or Android may not reach the activity; absent events do 
 `adb shell getevent -lt` can supplement the probe while manually pressing known keys; stop with Ctrl+C.
 Injected key events test Android input routing, not physical Sym/Fn mappings.
 See [device validation](docs/device-validation.md) for observed results and remaining checks.
+
+Language toggle: Ctrl+Shift+J. Ctrl+Space switches Android IMEs on the tested device and must not be used for the internal toggle.
