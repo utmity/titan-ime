@@ -29,7 +29,7 @@ The user subsequently authorized automated default-IME changes. `-SelectTitanIme
 
 Injected events observed by the IME: A=29, J=38, K=39, N=42, B=30, DEL=67, ENTER=66; Ctrl+Shift meta=4097. ScanCode=0/device=-1 identifies these as synthetic, not hardware evidence.
 
-Sym/Fn and physical scan-code mapping remain pending labeled user presses. An initial getevent observation window contained no presses and was stopped. The probe logs key metadata, not editor contents; metadata can still reveal keys, so use only test input. IME-side probe logging is restricted to debuggable builds and the harness editor package. The harness activity probe is confined to that app.
+The initial observation window contained no presses; the labeled physical capture below subsequently completed the requested mapping. The probe logs key metadata, not editor contents; metadata can still reveal keys, so use only test input. IME-side probe logging is restricted to debuggable builds and the harness editor package. The harness activity probe is confined to that app.
 
 ## Reproduce
 
@@ -57,3 +57,21 @@ On this device, reinstalling while Titan remained selected sometimes left its se
 ## 2026-10-24 resume
 
 USB device remained connected. Titan was installed/registered but absent from enabled_input_methods, and `ime set` returned `Unknown input method`. After the user's authorization to manage default-IME switching, Titan alone was re-enabled and selected for continued testing. Other enabled IMEs were retained. The runner still does not enable/disable IMEs automatically. Physical TitanKey capture was started for labeled user presses; this is not yet a mapping result.
+
+## Physical key capture completed — 2026-10-24
+
+The user confirmed pressing A, Sym, Fn, Sym+A, Fn+A in that order. Linux events from TitanKey and Android activity/IME logs matched all five groups. Device log timestamps were 05:36:06–05:36:24 JST; Linux monotonic timestamps were 39507.460946–39525.585390. These are physical events, deviceId=0 (not the earlier injected deviceId=-1).
+
+| Physical operation | Linux EV_KEY | Android keyCode / scanCode | Observed metaState |
+| --- | --- | --- | --- |
+| A | KEY_A | 29 / 30 | 0 on down/up |
+| Sym | 0x00fd (253) | 63 (KEYCODE_SYM) / 253 | down=4, up=0 |
+| Fn | 0x00fb (251) | 403 / 251 | 0 on down/up |
+| Sym held + A | 0x00fd down, KEY_A down/up, 0x00fd up | A=29 / 30 | A down/up=4 |
+| Fn held + A | 0x00fb down, KEY_A down/up, 0x00fb up | A=29 / 30 | A down/up=0 |
+
+SDK definitions identify meta=4 as META_SYM_ON; META_FUNCTION_ON is 8 and was not present in the Fn+A observation. The local SDK KeyEvent definitions do not name code 403; retain the numeric value rather than guessing a standard Fn key code.
+
+All down events reached TitanImeService with japanese=false and connected=true, and both down/up events reached the harness activity. This verifies English-mode pass-through for this sequence. It does not establish Japanese-mode Sym/Fn semantics, the produced characters, other Fn chords, long presses or repeat behavior. Future Fn support needs the observed key's own press/release state (or further device mapping evidence), not only META_FUNCTION_ON. No Fn remapping is introduced by this PR.
+
+Capture was stopped after collecting the sequence. Default IME remains Titan; previously enabled PhysiBoard, the original keyboard service and FluxKeyboard remain enabled.
