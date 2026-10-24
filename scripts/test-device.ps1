@@ -13,7 +13,7 @@ function Adb {
     return $result
 }
 $titan = 'dev.utmity.titanime/.TitanImeService'
-if ((Adb get-state).Trim() -ne 'device') { throw 'Device is not ready' }
+if (((Adb get-state) -join "`n").Trim() -ne 'device') { throw 'Device is not ready' }
 $before = ((Adb shell settings get secure default_input_method) -join '').Trim()
 $enabled = (Adb shell settings get secure enabled_input_methods) -join "`n"
 if ($FallbackIme -and -not $SelectTitanIme) { throw '-FallbackIme requires -SelectTitanIme' }
@@ -26,7 +26,7 @@ if ($InputSequence -and -not $SelectTitanIme -and $before -ne $titan) {
 $output = Join-Path 'test-results' (Get-Date -Format 'yyyyMMdd-HHmmss')
 New-Item -ItemType Directory -Force $output | Out-Null
 if (-not $SkipInstall) {
-    & .\gradlew.bat :app:assembleDebug :app:testDebugUnitTest :harness:assembleDebug :harness:assembleDebugAndroidTest --console=plain 2>&1 | Tee-Object "$output/build.log"
+    & .\gradlew.bat :app:assembleDebug :harness:assembleDebug :harness:assembleDebugAndroidTest --console=plain 2>&1 | Tee-Object "$output/build.log"
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 }
 function RunTest([string]$Package, [string]$Name) {

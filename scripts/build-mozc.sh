@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export USE_BAZEL_VERSION=9.0.2
 # Linux/WSL2 host: Python >=3.12, C++ compiler, Bazelisk, git.
 revision=c4b2aef7c65e61be394bacadaec200eb5b97f91c
 root=$(cd "$(dirname "$0")/.." && pwd)

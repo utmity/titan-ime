@@ -16,9 +16,9 @@ class InputDeviceTest {
         assertEquals("Select Titan IME manually before running this test",
             "dev.utmity.titanime/.TitanImeService",
             Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD))
-        val connected = java.util.concurrent.CountDownLatch(1)
+        val connected = java.util.concurrent.atomic.AtomicInteger()
         val receiver = object : android.content.BroadcastReceiver() {
-            override fun onReceive(c: android.content.Context?, intent: Intent?) { connected.countDown() }
+            override fun onReceive(c: android.content.Context?, intent: Intent?) { connected.incrementAndGet() }
         }
         val filter = android.content.IntentFilter("dev.utmity.titanime.INPUT_READY")
         androidx.core.content.ContextCompat.registerReceiver(
@@ -34,7 +34,7 @@ class InputDeviceTest {
                     if (activity.editor.hasWindowFocus()) {
                         activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
                             .showSoftInput(activity.editor, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
-                        ready = connected.count == 0L
+                        ready = connected.get() > 0
                     }
                 }
                 Thread.sleep(100)
@@ -63,6 +63,7 @@ class InputDeviceTest {
             key(KeyEvent.KEYCODE_K); expect("k", true)
             key(KeyEvent.KEYCODE_DEL); expect("", false)
             key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A); expect("か", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("か", false)
             key(KeyEvent.KEYCODE_ENTER); expect("か\n", false)
             key(KeyEvent.KEYCODE_N); expect("か\nn", true)
             key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON); expect("か\nん", false)
@@ -110,8 +111,44 @@ class InputDeviceTest {
                 expected += "か"
                 expect(expected, true)
                 key(KeyEvent.KEYCODE_ENTER)
+                expect(expected, false)
+                key(KeyEvent.KEYCODE_ENTER)
                 expected += "\n"
                 expect(expected, false)
+            }
+            // Mozc conversion: physical-key equivalent injection into the real InputConnection.
+            fun clearEditor() {
+                val before = connected.get()
+                instrumentation.runOnMainSync {
+                    activity.editor.setText("")
+                    activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                        .restartInput(activity.editor)
+                }
+                val timeout = android.os.SystemClock.uptimeMillis() + 10000
+                while (connected.get() == before && android.os.SystemClock.uptimeMillis() < timeout) Thread.sleep(50)
+                org.junit.Assert.assertTrue("Input must reconnect after clearing editor", connected.get() > before)
+                instrumentation.waitForIdleSync()
+            }
+            fun type(text: String) { text.forEach { key(KeyEvent.KEYCODE_A + (it - 'a')) } }
+            clearEditor()
+            type("nihongo"); expect("にほんご", true)
+            key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
+            key(KeyEvent.KEYCODE_SPACE)
+            var alternate = ""
+            instrumentation.runOnMainSync { alternate = activity.editor.text.toString() }
+            org.junit.Assert.assertNotEquals("Space must select another candidate", "日本語", alternate)
+            org.junit.Assert.assertTrue("Candidate must not be empty", alternate.isNotEmpty())
+            expect(alternate, true)
+            key(KeyEvent.KEYCODE_ENTER); expect(alternate, false)
+            key(KeyEvent.KEYCODE_ENTER); expect("$alternate\n", false)
+            clearEditor()
+            type("nihongo"); key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
+            key(KeyEvent.KEYCODE_ESCAPE); expect("にほんご", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("にほんご", false)
+            // Former custom-composer regressions now exercise Mozc itself on Android.
+            for ((roman, kana) in mapOf("konnichiha" to "こんにちは", "kitte" to "きって", "nna" to "んな", "kanna" to "かんな")) {
+                clearEditor(); type(roman); expect(kana, true)
+                key(KeyEvent.KEYCODE_ENTER); expect(kana, false)
             }
             key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
         } finally {

@@ -1,48 +1,89 @@
 package dev.utmity.titanime
 
 import android.inputmethodservice.InputMethodService
+import android.text.InputType
 import android.view.KeyEvent
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import android.widget.HorizontalScrollView
+import android.widget.LinearLayout
 import android.widget.TextView
+import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.Output
+import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.SessionCommand
+import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.KeyEvent as MozcKey
 
-/**
- * Prototype physical-keyboard IME.
- * Ctrl+Shift+J toggles language internally. Ctrl+Space is reserved by Android
- * for switching input methods on the tested Titan device.
- */
+/** Physical routing belongs here; Japanese composition and conversion belong to Mozc. */
 class TitanImeService : InputMethodService() {
-    private val composer = RomajiComposer()
+    private var engine: MozcEngine? = null
     private var japanese = false
-    private var strip: TextView? = null
+    private var directField = false
+    private var preedit = ""
+    private var output = Output.getDefaultInstance()
+    private var candidateRow: LinearLayout? = null
     private val titanFnDevices = mutableSetOf<Int>()
+    private val consumedKeys = mutableSetOf<Pair<Int, Int>>()
 
-    // Observed TitanKey mapping: vendor key 403 / Linux scan code 251.
+    override fun onCreate() {
+        super.onCreate()
+        try { engine = MozcEngine(this) }
+        catch (error: Exception) { android.util.Log.e("TitanImeProbe", "Mozc initialization failed", error) }
+        catch (error: LinkageError) { android.util.Log.e("TitanImeProbe", "Mozc native library unavailable", error) }
+    }
+
     private fun isTitanFn(event: KeyEvent) = event.keyCode == 403 && event.scanCode == 251
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (isTitanFn(event)) titanFnDevices.remove(event.deviceId)
+        if (consumedKeys.remove(event.deviceId to keyCode)) return true
         return super.onKeyUp(keyCode, event)
     }
 
     override fun onFinishInput() {
+        engine?.close()
+        preedit = ""
+        output = Output.getDefaultInstance()
         titanFnDevices.clear()
+        consumedKeys.clear()
+        setCandidatesViewShown(false)
         super.onFinishInput()
     }
 
-    override fun onCreateInputView(): View {
-        return TextView(this).apply {
-            textSize = 14f
-            setPadding(12, 6, 12, 6)
-            strip = this
-            refreshStrip()
-        }
+    override fun onEvaluateFullscreenMode() = false
+    override fun onEvaluateInputViewShown(): Boolean {
+        super.onEvaluateInputViewShown()
+        return false
     }
 
-    override fun onStartInput(attribute: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
+    override fun onCreateCandidatesView(): View = HorizontalScrollView(this).apply {
+        setBackgroundColor(android.graphics.Color.WHITE)
+        // Some hardware-keyboard devices report zero bottom inset for the IME
+        // even while its navigation buttons overlap the candidate window.
+        val navigationClearance = (32 * resources.displayMetrics.density).toInt()
+        setPadding(0, 0, 0, navigationClearance)
+        setOnApplyWindowInsetsListener { view, insets ->
+            val bottom = if (android.os.Build.VERSION.SDK_INT >= 30)
+                insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
+            else insets.systemWindowInsetBottom
+            view.setPadding(0, 0, 0, maxOf(bottom, navigationClearance))
+            insets
+        }
+        candidateRow = LinearLayout(this@TitanImeService).also { addView(it) }
+        refreshStrip()
+    }
+
+    override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
-        composer.clear()
+        engine?.start()
+        preedit = ""
+        output = Output.getDefaultInstance()
         titanFnDevices.clear()
+        consumedKeys.clear()
+        val type = attribute?.inputType ?: 0
+        val variation = type and InputType.TYPE_MASK_VARIATION
+        directField = (type and InputType.TYPE_MASK_CLASS) != InputType.TYPE_CLASS_TEXT ||
+            variation in setOf(InputType.TYPE_TEXT_VARIATION_PASSWORD,
+                InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)
         refreshStrip()
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
             attribute?.packageName == "dev.utmity.titanime.harness") {
@@ -52,23 +93,71 @@ class TitanImeService : InputMethodService() {
     }
 
     private fun refreshStrip() {
-        strip?.text = if (japanese) "あ  " + composer.text() else "A  Direct input"
+        candidateRow?.apply {
+            removeAllViews()
+            addView(TextView(this@TitanImeService).apply {
+                text = if (engine == null) "Mozc unavailable" else "あ  "
+                setTextColor(android.graphics.Color.DKGRAY)
+                setPadding(12, 12, 12, 12)
+            })
+            val window = output.candidateWindow
+            if (window.candidateCount == 0) addView(TextView(this@TitanImeService).apply {
+                text = preedit
+                textSize = 18f
+                setTextColor(android.graphics.Color.BLACK)
+                setPadding(18, 12, 18, 12)
+            })
+            for (candidate in window.candidateList) {
+                addView(TextView(this@TitanImeService).apply {
+                    text = (if (window.hasFocusedIndex() && window.focusedIndex == candidate.index) "● " else "") + candidate.value
+                    textSize = 18f
+                    setTextColor(android.graphics.Color.BLACK)
+                    setPadding(18, 12, 18, 12)
+                    setOnClickListener {
+                        val ic = currentInputConnection ?: return@setOnClickListener
+                        val result = engine?.command(SessionCommand.CommandType.HIGHLIGHT_CANDIDATE, candidate.id)
+                            ?: return@setOnClickListener
+                        applyOutput(ic, result)
+                    }
+                })
+            }
+        }
+        setCandidatesViewShown(japanese && !directField && preedit.isNotEmpty())
     }
 
-    private fun replaceComposing(ic: InputConnection) {
-        ic.setComposingText(composer.text(), 1)
+    private fun applyOutput(ic: InputConnection, result: Output) {
+        ic.beginBatchEdit()
+        try {
+            if (result.hasResult()) ic.commitText(result.result.value, 1)
+            val next = result.preedit.segmentList.joinToString("") { it.value }
+            if (next.isNotEmpty()) ic.setComposingText(next, 1)
+            else {
+                if (preedit.isNotEmpty() && !result.hasResult()) ic.setComposingText("", 1)
+                ic.finishComposingText()
+            }
+            preedit = next
+            output = result
+        } finally { ic.endBatchEdit() }
         refreshStrip()
     }
 
     private fun commitComposition(ic: InputConnection) {
-        composer.flush()
-        if (composer.text().isNotEmpty()) ic.commitText(composer.text(), 1)
-        else ic.finishComposingText()
-        composer.clear()
-        refreshStrip()
+        if (preedit.isEmpty()) return
+        // Ask Mozc to resolve pending romaji (notably final n) before kana commitment.
+        // An already converted candidate must retain the user's selected spelling.
+        if (!output.preedit.hasHighlightedPosition()) {
+            engine?.key(MozcKey.newBuilder().setSpecialKey(MozcKey.SpecialKey.F6).build())
+        }
+        engine?.command(SessionCommand.CommandType.SUBMIT)?.let { applyOutput(ic, it) }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        val consumed = handleKey(keyCode, event)
+        if (consumed) consumedKeys.add(event.deviceId to keyCode)
+        return consumed
+    }
+
+    private fun handleKey(keyCode: Int, event: KeyEvent): Boolean {
         if (isTitanFn(event)) titanFnDevices.add(event.deviceId)
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
             currentInputEditorInfo?.packageName == "dev.utmity.titanime.harness") {
@@ -76,10 +165,10 @@ class TitanImeService : InputMethodService() {
         }
         val ic = currentInputConnection ?: return super.onKeyDown(keyCode, event)
         if (event.isSymPressed || event.isFunctionPressed || event.deviceId in titanFnDevices) {
-            if (japanese && composer.text().isNotEmpty()) {
+            if (japanese && preedit.isNotEmpty()) {
                 commitComposition(ic)
-                // Keep commit and the following key ordered on the same connection.
                 ic.sendKeyEvent(event)
+                ic.sendKeyEvent(KeyEvent.changeAction(event, KeyEvent.ACTION_UP))
                 return true
             }
             return super.onKeyDown(keyCode, event)
@@ -88,42 +177,50 @@ class TitanImeService : InputMethodService() {
             !event.isAltPressed && !event.isMetaPressed) {
             if (event.repeatCount > 0) return true
             if (japanese) commitComposition(ic)
-            japanese = !japanese
+            if (engine != null && !directField) japanese = !japanese
             refreshStrip()
             return true
         }
-        if (!japanese || event.isAltPressed || event.isCtrlPressed || event.isMetaPressed) {
-            return super.onKeyDown(keyCode, event)
+        if (!japanese || directField || engine == null) return super.onKeyDown(keyCode, event)
+        if (event.isAltPressed || event.isCtrlPressed || event.isMetaPressed) {
+            commitComposition(ic)
+            ic.sendKeyEvent(event)
+            ic.sendKeyEvent(KeyEvent.changeAction(event, KeyEvent.ACTION_UP))
+            return true
         }
-        when (keyCode) {
-            KeyEvent.KEYCODE_DEL -> {
-                if (composer.text().isNotEmpty()) {
-                    composer.backspace()
-                    replaceComposing(ic)
-                    if (composer.text().isEmpty()) ic.finishComposingText()
-                    refreshStrip()
-                    return true
-                }
-            }
-            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_SPACE -> {
+        val special = when (keyCode) {
+            KeyEvent.KEYCODE_DEL -> MozcKey.SpecialKey.BACKSPACE
+            KeyEvent.KEYCODE_SPACE -> MozcKey.SpecialKey.SPACE
+            KeyEvent.KEYCODE_ENTER -> MozcKey.SpecialKey.ENTER
+            KeyEvent.KEYCODE_ESCAPE -> MozcKey.SpecialKey.ESCAPE
+            KeyEvent.KEYCODE_DPAD_DOWN -> MozcKey.SpecialKey.DOWN
+            KeyEvent.KEYCODE_DPAD_UP -> MozcKey.SpecialKey.UP
+            else -> null
+        }
+        if (special != null) {
+            if (preedit.isEmpty()) return super.onKeyDown(keyCode, event)
+            if (keyCode == KeyEvent.KEYCODE_ENTER) {
                 commitComposition(ic)
-                if (keyCode == KeyEvent.KEYCODE_SPACE) ic.commitText(" ", 1)
-                else ic.sendKeyEvent(event)
                 return true
             }
+            val key = MozcKey.newBuilder().setSpecialKey(special)
+            if (event.isShiftPressed) key.addModifierKeys(MozcKey.ModifierKey.SHIFT)
+            val result = engine!!.key(key.build())
+            applyOutput(ic, result)
+            return result.consumed
         }
         val unicode = event.unicodeChar
-        if (unicode > 0) {
+        if (unicode in 1..127) {
             val c = unicode.toChar()
-            if (c.isLetter() && c.code < 128) {
-                composer.type(c)
-                replaceComposing(ic)
-                return true
+            if (c.isLetter()) {
+                val result = engine!!.key(MozcKey.newBuilder().setKeyCode(c.lowercaseChar().code).build())
+                applyOutput(ic, result)
+                return result.consumed
             }
-            if (composer.text().isNotEmpty()) {
+            if (preedit.isNotEmpty()) {
                 commitComposition(ic)
-                // Preserve editor cursor order before the next composing syllable.
                 ic.sendKeyEvent(event)
+                ic.sendKeyEvent(KeyEvent.changeAction(event, KeyEvent.ACTION_UP))
                 return true
             }
         }

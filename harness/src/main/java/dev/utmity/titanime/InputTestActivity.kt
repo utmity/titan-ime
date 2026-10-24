@@ -13,7 +13,9 @@ class InputTestActivity : Activity() {
     lateinit var editor: EditText
     private lateinit var events: TextView
     override fun onCreate(state: Bundle?) {
+        setTheme(android.R.style.Theme_Material_Light_NoActionBar)
         super.onCreate(state)
+        window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
         editor = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             hint = "Titan IME input test"
@@ -22,6 +24,13 @@ class InputTestActivity : Activity() {
         events = TextView(this)
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setOnApplyWindowInsetsListener { view, insets ->
+                if (android.os.Build.VERSION.SDK_INT >= 30) {
+                    val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars())
+                    view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                } else view.setPadding(0, insets.systemWindowInsetTop, 0, insets.systemWindowInsetBottom)
+                insets
+            }
             addView(editor)
             addView(events)
         })

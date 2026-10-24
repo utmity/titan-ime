@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.google.protobuf") version "0.9.4"
 }
 android {
     namespace = "dev.utmity.titanime"
@@ -23,6 +24,22 @@ kotlin {
 }
 
 dependencies {
-
+    implementation("com.google.protobuf:protobuf-javalite:4.34.1")
     testImplementation("junit:junit:4.13.2")
 }
+protobuf {
+    protoc { artifact = "com.google.protobuf:protoc:4.34.1" }
+    generateProtoTasks {
+        all().configureEach {
+            builtins { maybeCreate("java").option("lite") }
+        }
+    }
+}
+val verifyMozcAssets by tasks.registering {
+    doLast {
+        for (path in listOf("src/main/jniLibs/arm64-v8a/libmozc.so", "src/main/assets/mozc.data")) {
+            check(file(path).isFile) { "Missing $path. Build Mozc and run scripts/import-mozc.ps1 first." }
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn(verifyMozcAssets) }

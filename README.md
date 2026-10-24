@@ -1,45 +1,40 @@
 # Titan IME
 
-Physical-keyboard-first Android IME for Unihertz Titan 2 Elite.
+Physical-keyboard-first Android IME for Unihertz Titan 2 Elite, with on-device Mozc kana-kanji conversion.
 
-## Goals
-- Keep English key input on a minimal direct-commit path.
-- Add Japanese romaji composition without switching Android IMEs.
-- Preserve hardware Sym/Fn handling and allow configurable language toggle.
-- Integrate a Japanese conversion engine later behind a non-blocking interface.
-- Keep a distinct application ID so existing IMEs remain installed.
+## Priorities and architecture
 
-## Development stages
-1. Independent Android InputMethodService and testable Kotlin romaji composer.
-2. Composition editing, cursor, cancellation, hardware key routing and performance tests.
-3. Mozc integration, candidate UI, dictionary and learning.
+Mozc owns Japanese romaji, composition, conversion and candidates. Titan owns Android editor updates and physical-key routing. The custom Kotlin romaji converter has been removed; its regression cases now run against Mozc on the device.
 
-## Reference
-PhysiBoard (https://github.com/brobata/physiboard) is a GPL-3.0 clean-room rewrite with pure Kotlin core modules. Any reuse of its source requires license compliance; this project currently contains no PhysiBoard code.
+Basic kana-kanji conversion and editor stability take priority over settings and additional shortcuts. See [integration decisions, OSS licenses and build requirements](docs/mozc-integration.md) and [device validation](docs/device-validation.md).
 
-Status: installable prototype with a separate test-editor app and device instrumentation tests.
+## Input
 
-## Device development (Windows)
-Set `ANDROID_HOME` to the Android SDK directory and use JDK 17.
-The Gradle 8.9 wrapper builds the IME (`app`) and separate editor (`harness`).
-Run `./scripts/test-device.ps1 -Serial <adb-serial>` for build, install and composer checks.
-Add `-InputSequence -SelectTitanIme` to explicitly select an already enabled Titan IME for the test and restore the previous selection in finally. Without `-SelectTitanIme`, select Titan IME manually.
-The script never enables/disables IMEs or uninstalls packages. `-SkipInstall` tests installed APKs without building or installing.
-Results are saved under ignored `test-results/`; inspect before sharing logs.
+- Ctrl+Shift+J toggles English/Japanese. Ctrl+Space is reserved by Android for IME switching on the tested device.
+- Type romaji, press Space to convert, then Space again to advance candidates. The candidate strip also supports touch selection.
+- Enter commits composing/converting text without sending an Enter to the editor. Press Enter again for the editor's normal action.
+- Escape returns from conversion to the reading; Backspace edits through Mozc.
+- Sym/function-modified keys pass through after committing pending text. The observed Titan Fn pair (key 403 / scan 251) is tracked per device because Fn+A has no standard modifier flag. No symbol remapping is supplied.
+- Password and non-text fields use direct input. Learning is disabled for this initial integration. The app has no network permission.
 
-Open the isolated editor with `adb -s <adb-serial> shell am start -n dev.utmity.titanime.harness/dev.utmity.titanime.InputTestActivity`.
-Its key probe records action, keyCode, scanCode, metaState and deviceId, not editor text.
-Keys consumed by an IME or Android may not reach the activity; absent events do not prove absent hardware keys.
-`adb shell getevent -lt` can supplement the probe while manually pressing known keys; stop with Ctrl+C.
-Injected key events test Android input routing, not physical Sym/Fn mappings.
-See [device validation](docs/device-validation.md) for observed results and remaining checks.
+## Build and device tests (Windows)
 
-Language toggle: Ctrl+Shift+J. Ctrl+Space switches Android IMEs on the tested device and must not be used for the internal toggle.
+Use JDK 17, Android SDK 35, and set ANDROID_HOME. The Gradle 8.9 wrapper builds the IME (`app`) and separate editor (`harness`).
 
-On the tested device, use -FallbackIme <enabled-other-ime-id> with -SelectTitanIme to switch away before reinstalling and reconnect Titan afterwards. The original selection is restored even on test failure. Composer regressions run as JVM unit tests; input routing runs in the separate harness app. The Debug IME sends an input-start notification only to that harness so tests can wait for an actual connection.
+First build the pinned engine on Linux/WSL2 with `bash scripts/build-mozc.sh`, or download the mozc-arm64 artifact from a successful trusted GitHub Actions run in this repository. Extract it and run `./scripts/import-mozc.ps1 -Source <extracted-directory>`. The importer checks revision and checksums. Engine and dictionary binaries are ignored by Git; Gradle fails clearly if they are missing. Initial device support is arm64-v8a only.
 
-Japanese mode passes Sym/function-modified keys through after committing pending text. Titan's observed Fn key (403 / scan 251) is tracked while held because Fn+A carries no standard modifier bit; its state is cleared on release and input lifecycle changes. No symbol mapping is supplied.
+Run `./scripts/test-device.ps1 -Serial <adb-serial> -InputSequence -SelectTitanIme` to build, install, test and restore the starting IME. Titan must already be enabled. Without -SelectTitanIme, select Titan manually. The runner never enables/disables IMEs or uninstalls packages. Use -SkipInstall to test installed APKs.
 
-Pre-review checks: run Gradle tasks :app:lintDebug :harness:lintDebug :app:assembleRelease and scripts/test-runner-cleanup.ps1. The cleanup test uses a mocked ADB function and verifies IME restoration when log collection fails. Release output is unsigned; it is not a distribution-ready package.
+On this device, add `-FallbackIme <enabled-other-ime-id>` with -SelectTitanIme to switch away before updating Titan, avoiding the observed stale connection after installation. The original selection is restored in finally, even if instrumentation or log collection fails.
 
-GitHub Actions runs unit tests, Android Lint, Debug/unsigned Release builds, and the offline Windows cleanup regression on pull requests and main pushes. Reports and Debug test APKs are retained for 7 days. CI does not run a Titan device or validate physical key behavior; use scripts/test-device.ps1 for that. CI Debug APKs use a different signing key from local builds, so use locally built APKs for adb install -r over an existing local installation.
+Results are saved under ignored test-results/. Inspect before sharing logs. Composer/conversion regressions run through the actual native engine in the separate harness instrumentation; there is no mock converter or old JVM composer test counted as Mozc validation.
+
+Open the isolated editor with `adb -s <adb-serial> shell am start -n dev.utmity.titanime.harness/dev.utmity.titanime.InputTestActivity`. Its key probe records action, keyCode, scanCode, metaState and deviceId. A Debug-only IME notification lets tests wait for an actual input connection. Injected events test Android input routing, not physical hardware signals. Use `adb shell getevent -lt` while pressing known keys for physical capture, then stop capture.
+
+## CI and review
+
+GitHub Actions builds/caches the pinned Mozc engine and dictionary on Linux, packages Debug and unsigned Release APKs, runs Android Lint and the offline Windows cleanup regression. The latter uses mocked ADB to verify restoration after test/log failures. CI has no Titan device; use the device runner for native input tests.
+
+Reports and Debug test APKs are retained for 7 days. CI Debug signing differs from local builds: use locally built APKs for install-r over an existing local installation. Release output is unsigned and is not distribution-ready.
+
+Local checks: `./gradlew.bat :app:lintDebug :harness:lintDebug :app:assembleRelease` and `./scripts/test-runner-cleanup.ps1`.

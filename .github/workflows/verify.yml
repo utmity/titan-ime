@@ -15,9 +15,9 @@ concurrency:
 
 jobs:
   android:
-    name: Android build, unit tests and lint
+    name: Android build and lint
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -31,10 +31,22 @@ jobs:
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
         with:
           packages: 'platform-tools platforms;android-35 build-tools;34.0.0'
+      - name: Restore pinned Mozc build
+        id: mozc-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .local/mozc-dist
+          key: mozc-arm64-${{ runner.os }}-${{ hashFiles('scripts/build-mozc.sh') }}
+      - name: Build Mozc on Linux
+        if: steps.mozc-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-mozc.sh
+      - name: Package engine and dictionary
+        shell: pwsh
+        run: ./scripts/import-mozc.ps1 -Source .local/mozc-dist
       - name: Verify and build (no device connected)
         run: >-
           bash gradlew --no-daemon --console=plain
-          :app:testDebugUnitTest :app:lintDebug :harness:lintDebug
+          :app:lintDebug :harness:lintDebug
           :app:assembleDebug :app:assembleRelease
           :harness:assembleDebug :harness:assembleDebugAndroidTest
       - name: Save verification reports
