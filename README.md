@@ -41,3 +41,5 @@ On the tested device, use -FallbackIme <enabled-other-ime-id> with -SelectTitanI
 Japanese mode passes Sym/function-modified keys through after committing pending text. Titan's observed Fn key (403 / scan 251) is tracked while held because Fn+A carries no standard modifier bit; its state is cleared on release and input lifecycle changes. No symbol mapping is supplied.
 
 Pre-review checks: run Gradle tasks :app:lintDebug :harness:lintDebug :app:assembleRelease and scripts/test-runner-cleanup.ps1. The cleanup test uses a mocked ADB function and verifies IME restoration when log collection fails. Release output is unsigned; it is not a distribution-ready package.
+
+GitHub Actions runs unit tests, Android Lint, Debug/unsigned Release builds, and the offline Windows cleanup regression on pull requests and main pushes. Reports and Debug test APKs are retained for 7 days. CI does not run a Titan device or validate physical key behavior; use scripts/test-device.ps1 for that. CI Debug APKs use a different signing key from local builds, so use locally built APKs for adb install -r over an existing local installation.
