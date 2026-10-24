@@ -99,6 +99,21 @@ class InputDeviceTest {
             key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A); expect("か\nんbaaかんakaaか", true)
             key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
             expect("か\nんbaaかんakaaか", false)
+            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
+            var expected = "か\nんbaaかんakaaか"
+            for ((code, symbol) in listOf(KeyEvent.KEYCODE_PERIOD to ".", KeyEvent.KEYCODE_COMMA to ",", KeyEvent.KEYCODE_1 to "1")) {
+                key(KeyEvent.KEYCODE_N)
+                key(code)
+                expected += "ん$symbol"
+                expect(expected, false)
+                key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A)
+                expected += "か"
+                expect(expected, true)
+                key(KeyEvent.KEYCODE_ENTER)
+                expected += "\n"
+                expect(expected, false)
+            }
+            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
         } finally {
             context.unregisterReceiver(receiver)
             instrumentation.runOnMainSync { activity.finish() }

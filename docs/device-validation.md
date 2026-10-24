@@ -104,3 +104,13 @@ Capture stopped; default IME restored to the pre-test PhysiBoard dev3. No source
 - Lint warnings remain for prototype metadata/backup rules, available dependency updates and diagnostic UI text; no lint errors. Release output is `app-release-unsigned.apk`: build-verified only, not signed for distribution or installed on the device.
 - Fixed runner cleanup: a failed logcat collection now emits a warning instead of skipping IME restoration. Offline `scripts/test-runner-cleanup.ps1` mocks ADB and verifies restoration with both successful and failed instrumentation while logcat fails; PASS. It does not access a device.
 - Rebuilt/reinstalled and reran the complete device regression after the receiver change: `OK (1 test)`, 6.357 seconds. The runner restored PhysiBoard dev3 successfully.
+
+## Punctuation ordering regression — 2026-10-24
+
+Device-injected Japanese `n`, period, `k`, `a` reproduced `んか.` instead of `ん.か`. The committed text initially looked correct after the period, but the next composing syllable exposed a stale insertion position. The ordinary printable-symbol path now sends the key through the same InputConnection after committing pending text, matching the ordered modifier path.
+
+Regression cases cover period, comma and digit 1 after pending n, followed by ka and Enter. This tests actual Android editor/IME interaction on the USB device using injected events; these punctuation sequences were not physically pressed by the user.
+
+Punctuation fix validation completed: full device regression PASS, `OK (1 test)`, 8.875 seconds. Period/comma/digit followed by ka and Enter passed together with all earlier input and modifier cases. `:app:lintDebug :harness:lintDebug :app:assembleRelease` also passed; release APK remains unsigned and was not installed. The resumed run recorded Titan as its initial selection and restored Titan at completion.
+
+An installation pause was caused by Play Protect asking whether to send Titan IME Test to Google for analysis. The user handled this prompt; the agent did not choose upload consent or change Play Protect settings. The earlier interrupted run had saved only build output and was not counted as a successful device test.

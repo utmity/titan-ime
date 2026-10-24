@@ -120,7 +120,12 @@ class TitanImeService : InputMethodService() {
                 replaceComposing(ic)
                 return true
             }
-            if (composer.text().isNotEmpty()) commitComposition(ic)
+            if (composer.text().isNotEmpty()) {
+                commitComposition(ic)
+                // Preserve editor cursor order before the next composing syllable.
+                ic.sendKeyEvent(event)
+                return true
+            }
         }
         return super.onKeyDown(keyCode, event)
     }
