@@ -5,3 +5,6 @@ local.properties
 *.iml
 test-results/
 build-verification.log
+.local/
+app/src/main/jniLibs/
+app/src/main/assets/mozc.data
