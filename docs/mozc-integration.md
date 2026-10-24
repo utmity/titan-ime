@@ -43,6 +43,7 @@ This is the OSS dictionary, not Google's proprietary Japanese Input dictionary. 
 - Ctrl+Shift+J: existing EN/JA toggle; Android retains Ctrl+Space.
 - Roman letters: Mozc composing kana. Pending Latin letters retain half width.
 - Space with preedit: convert / advance candidate. Candidate strip can also select by touch.
+- The candidate strip uses a compact Android input view (no software keyboard keys). The candidates-only window was clipped on this device; reserving input-view space makes candidates visible and touchable above navigation controls. It remains visible in Japanese mode even with empty preedit.
 - Enter with preedit: commit only. A subsequent Enter is passed to the editor.
 - Escape: Mozc cancel/back-to-reading behavior. Backspace: Mozc editing behavior.
 - Sym, standard function modifier and the observed Titan Fn pair (403/251): preserved bypass routing. Pending composition is committed before the modified event, with ordering on the same InputConnection.

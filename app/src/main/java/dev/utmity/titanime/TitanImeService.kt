@@ -45,31 +45,42 @@ class TitanImeService : InputMethodService() {
         output = Output.getDefaultInstance()
         titanFnDevices.clear()
         consumedKeys.clear()
-        setCandidatesViewShown(false)
+        requestHideSelf(0)
         super.onFinishInput()
     }
 
     override fun onEvaluateFullscreenMode() = false
     override fun onEvaluateInputViewShown(): Boolean {
         super.onEvaluateInputViewShown()
-        return false
+        return japanese && !directField
     }
 
-    override fun onCreateCandidatesView(): View = HorizontalScrollView(this).apply {
+    // A compact input view is used instead of the candidates-only window, which
+    // this device clips to the navigation bar when no software input view exists.
+    override fun onCreateInputView(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
         setBackgroundColor(android.graphics.Color.WHITE)
         // Some hardware-keyboard devices report zero bottom inset for the IME
         // even while its navigation buttons overlap the candidate window.
         val navigationClearance = (32 * resources.displayMetrics.density).toInt()
-        setPadding(0, 0, 0, navigationClearance)
-        setOnApplyWindowInsetsListener { view, insets ->
+        val scroll = HorizontalScrollView(this@TitanImeService).apply {
+            minimumHeight = (48 * resources.displayMetrics.density).toInt()
+            candidateRow = LinearLayout(this@TitanImeService).also { addView(it) }
+        }
+        addView(scroll, LinearLayout.LayoutParams(-1, -2))
+        val spacer = View(this@TitanImeService)
+        addView(spacer, LinearLayout.LayoutParams(-1, navigationClearance))
+        setOnApplyWindowInsetsListener { _, insets ->
             val bottom = if (android.os.Build.VERSION.SDK_INT >= 30)
                 insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
             else insets.systemWindowInsetBottom
-            view.setPadding(0, 0, 0, maxOf(bottom, navigationClearance))
+            val height = maxOf(bottom, navigationClearance)
+            if (spacer.layoutParams.height != height) {
+                spacer.layoutParams = LinearLayout.LayoutParams(-1, height)
+            }
             insets
         }
-        candidateRow = LinearLayout(this@TitanImeService).also { addView(it) }
-        refreshStrip()
+        refreshStrip(updateVisibility = false)
     }
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
@@ -92,7 +103,7 @@ class TitanImeService : InputMethodService() {
         }
     }
 
-    private fun refreshStrip() {
+    private fun refreshStrip(updateVisibility: Boolean = true) {
         candidateRow?.apply {
             removeAllViews()
             addView(TextView(this@TitanImeService).apply {
@@ -122,7 +133,11 @@ class TitanImeService : InputMethodService() {
                 })
             }
         }
-        setCandidatesViewShown(japanese && !directField && preedit.isNotEmpty())
+        if (updateVisibility) {
+            if (japanese && !directField) {
+                if (!isInputViewShown) requestShowSelf(0)
+            } else if (isInputViewShown) requestHideSelf(0)
+        }
     }
 
     private fun applyOutput(ic: InputConnection, result: Output) {

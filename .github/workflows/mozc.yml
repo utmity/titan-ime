@@ -1,9 +1,5 @@
 name: Mozc Android engine
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/mozc.yml'
-      - 'scripts/build-mozc.sh'
   workflow_dispatch:
 permissions:
   contents: read

@@ -41,13 +41,21 @@ class InputDeviceTest {
             }
             org.junit.Assert.assertTrue("Input connection not ready for the focused test editor", ready)
             Thread.sleep(1000)
+            fun requireTestFocus() {
+                instrumentation.runOnMainSync {
+                    org.junit.Assert.assertTrue("Test editor lost focus; abort input injection",
+                        activity.hasWindowFocus() && activity.editor.hasFocus())
+                }
+            }
             fun key(code: Int, meta: Int = 0) {
+                requireTestFocus()
                 assertEquals("IME changed; abort input injection", "dev.utmity.titanime/.TitanImeService",
                     Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD))
                 instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, code, 0, meta))
                 instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_UP, code, 0, meta))
                 instrumentation.waitForIdleSync()
                 Thread.sleep(100)
+                requireTestFocus()
                 assertEquals("IME changed after key $code", "dev.utmity.titanime/.TitanImeService",
                     Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD))
             }
@@ -73,6 +81,7 @@ class InputDeviceTest {
             key(KeyEvent.KEYCODE_A, KeyEvent.META_SYM_ON); expect("か\nんba", false)
             // Reproduce Titan's vendor Fn down/A/up sequence; this is not a physical press.
             fun vendorFn(action: Int) {
+                requireTestFocus()
                 instrumentation.sendKeySync(KeyEvent(0, 0, action, 403, 0, 0, 0, 251))
                 instrumentation.waitForIdleSync()
                 Thread.sleep(100)
@@ -141,6 +150,50 @@ class InputDeviceTest {
             expect(alternate, true)
             key(KeyEvent.KEYCODE_ENTER); expect(alternate, false)
             key(KeyEvent.KEYCODE_ENTER); expect("$alternate\n", false)
+            clearEditor()
+            type("nihongo"); key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_SPACE)
+            val automation = instrumentation.uiAutomation
+            val oldFlags = automation.serviceInfo.flags
+            automation.serviceInfo = automation.serviceInfo.apply {
+                flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            }
+            try {
+                var candidate: android.view.accessibility.AccessibilityNodeInfo? = null
+                val timeout = android.os.SystemClock.uptimeMillis() + 5000
+                while (candidate == null && android.os.SystemClock.uptimeMillis() < timeout) {
+                    for (window in automation.windows) {
+                        val root = window.root ?: continue
+                        if (root.packageName?.toString() != "dev.utmity.titanime") continue
+                        candidate = root.findAccessibilityNodeInfosByText("日本語").firstOrNull {
+                            it.text?.toString() == "日本語" && it.isClickable && it.isVisibleToUser
+                        }
+                        if (candidate != null) break
+                    }
+                    if (candidate == null) Thread.sleep(100)
+                }
+                org.junit.Assert.assertNotNull("Visible, clickable Japanese candidate required", candidate)
+                val bounds = android.graphics.Rect()
+                candidate!!.getBoundsInScreen(bounds)
+                val screen = context.resources.displayMetrics
+                org.junit.Assert.assertTrue("Candidate must be within screen", !bounds.isEmpty &&
+                    bounds.left >= 0 && bounds.top >= 0 && bounds.right <= screen.widthPixels &&
+                    bounds.bottom <= screen.heightPixels)
+                requireTestFocus()
+                val now = android.os.SystemClock.uptimeMillis()
+                for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                    val touch = android.view.MotionEvent.obtain(now, android.os.SystemClock.uptimeMillis(),
+                        action, bounds.exactCenterX(), bounds.exactCenterY(), 0)
+                    touch.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                    org.junit.Assert.assertTrue("Candidate touch injection", automation.injectInputEvent(touch, true))
+                    touch.recycle()
+                }
+                instrumentation.waitForIdleSync()
+                Thread.sleep(100)
+                expect("日本語", true)
+                key(KeyEvent.KEYCODE_ENTER); expect("日本語", false)
+            } finally {
+                automation.serviceInfo = automation.serviceInfo.apply { flags = oldFlags }
+            }
             clearEditor()
             type("nihongo"); key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
             key(KeyEvent.KEYCODE_ESCAPE); expect("にほんご", true)
