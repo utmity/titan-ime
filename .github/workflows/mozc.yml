@@ -1,0 +1,21 @@
+name: Mozc Android engine
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build pinned Mozc engine and dictionary
+        run: bash scripts/build-mozc.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mozc-arm64
+          path: .local/mozc-dist/
+          if-no-files-found: error
+          retention-days: 30
