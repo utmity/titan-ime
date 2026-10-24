@@ -138,3 +138,16 @@ Padding/spacer adjustments alone did not solve the candidates-only window: it re
 Manual ADB touch validation: after Space cycling to ニホンゴ, tapping the visible 日本語 candidate changed the editor to 日本語; Enter committed exactly 日本語 without a newline. The expanded instrumentation now finds the visible/clickable 日本語 node in Titan's own accessibility window, asserts screen bounds, injects a touch at its center, and checks composing selection and final commitment. It also checks test-editor focus before/after keys to abort if another app takes focus. Full regression PASS: `OK (1 test)`, 19.209 seconds. This touch and typing run is automated device injection, not a second user physical-key run. Starting default Titan was restored.
 
 Integrated Linux engine/dictionary build, Android packaging/Lint and Windows cleanup CI passed on 047da89 in [run 40071525377](https://github.com/utmity/titan-ime/actions/runs/40071525377). The final candidate-view changes are checked again on their own PR head.
+
+
+## Segment navigation and editor lifecycle — 2026-10-25
+
+The device reproduced stale cursor routing: after composing にほんご and selecting position 0, typing ka inserted at the old end (にほんごか). External selection changes now finish the visible composition in place and reset Mozc, preserving the editor cursor; the regression expects かにほんご.
+
+A second regression reproduced loss of the composing span when switching between two EditText fields. Removing the asynchronous hide request from onFinishInput prevents a previous field's teardown from finishing the next field's new composition. The complete device sequence passed in 25.989 seconds (local test-results/20261024-205819), including cursor relocation, left/right segment focus, and independent composition/commitment across two fields.
+
+Conversion now highlights the focused Mozc segment. Left/Right and the 前文節/次文節 touch controls change segment focus; Shift+Left/Right uses Mozc's segment resizing. No physical Fn mapping was changed. Cursor movement during unconverted reading commits it before forwarding the arrow. External cursor movement finalizes visible text rather than supporting editing within an existing Mozc composition.
+
+These new cases use Android event injection and editor callbacks on the USB device, not user physical presses. Switching to other apps remains unverified. The harness contains two separate multiline editors for lifecycle testing.
+
+Expanded device regression PASS: OK (1 test), 26.492 seconds, test-results/20261025-041926. Includes visible touch targets for previous/next segment, Shift+Right resizing, and all earlier input/conversion cases. Debug APK was rebuilt and installed; starting Titan IME selection was restored. Local app Lint, unsigned Release and harness test-APK builds passed. Play Protect requested sending the harness APK; the one-time Do not send action was selected, with no external upload or permanent setting change.

@@ -11,6 +11,7 @@ import android.widget.TextView
 /** Debug-only, isolated editor. Key metadata stays on screen; no typed text is logged. */
 class InputTestActivity : Activity() {
     lateinit var editor: EditText
+    lateinit var secondEditor: EditText
     private lateinit var events: TextView
     override fun onCreate(state: Bundle?) {
         setTheme(android.R.style.Theme_Material_Light_NoActionBar)
@@ -19,7 +20,12 @@ class InputTestActivity : Activity() {
         editor = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             hint = "Titan IME input test"
-            minLines = 4
+            minLines = 2
+        }
+        secondEditor = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            hint = "Second input field"
+            minLines = 2
         }
         events = TextView(this)
         setContentView(LinearLayout(this).apply {
@@ -32,6 +38,7 @@ class InputTestActivity : Activity() {
                 insets
             }
             addView(editor)
+            addView(secondEditor)
             addView(events)
         })
         editor.requestFocus()

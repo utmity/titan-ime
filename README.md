@@ -13,6 +13,8 @@ Basic kana-kanji conversion and editor stability take priority over settings and
 - Ctrl+Shift+J toggles English/Japanese. Ctrl+Space is reserved by Android for IME switching on the tested device.
 - Type romaji, press Space to convert, then Space again to advance candidates. The candidate strip also supports touch selection.
 - Enter commits composing/converting text without sending an Enter to the editor. Press Enter again for the editor's normal action.
+- During conversion, Left/Right or the 前文節/次文節 strip controls move segment focus; Shift+Left/Right changes segment length. The focused segment is highlighted.
+- Moving the editor cursor finalizes the visible composition and starts subsequent input at the new selection. Before conversion, Left/Right commits the reading and moves the editor cursor.
 - Escape returns from conversion to the reading; Backspace edits through Mozc.
 - Sym/function-modified keys pass through after committing pending text. The observed Titan Fn pair (key 403 / scan 251) is tracked per device because Fn+A has no standard modifier flag. No symbol remapping is supplied.
 - Password and non-text fields use direct input. Learning is disabled for this initial integration. The app has no network permission.

@@ -25,6 +25,7 @@ class InputDeviceTest {
             context, receiver, filter, androidx.core.content.ContextCompat.RECEIVER_EXPORTED)
         val activity = instrumentation.startActivitySync(Intent(context, InputTestActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as InputTestActivity
+        var targetEditor = activity.editor
         try {
             instrumentation.waitForIdleSync()
             var ready = false
@@ -44,7 +45,7 @@ class InputDeviceTest {
             fun requireTestFocus() {
                 instrumentation.runOnMainSync {
                     org.junit.Assert.assertTrue("Test editor lost focus; abort input injection",
-                        activity.hasWindowFocus() && activity.editor.hasFocus())
+                        activity.hasWindowFocus() && targetEditor.hasFocus())
                 }
             }
             fun key(code: Int, meta: Int = 0) {
@@ -61,8 +62,8 @@ class InputDeviceTest {
             }
             fun expect(text: String, composing: Boolean) {
                 instrumentation.runOnMainSync {
-                    assertEquals(text, activity.editor.text.toString())
-                    assertEquals("Composing span for '$text'", composing, BaseInputConnection.getComposingSpanStart(activity.editor.text) >= 0)
+                    assertEquals(text, targetEditor.text.toString())
+                    assertEquals("Composing span for '$text'", composing, BaseInputConnection.getComposingSpanStart(targetEditor.text) >= 0)
                 }
             }
             key(KeyEvent.KEYCODE_A); expect("a", false)
@@ -152,48 +153,51 @@ class InputDeviceTest {
             key(KeyEvent.KEYCODE_ENTER); expect("$alternate\n", false)
             clearEditor()
             type("nihongo"); key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_SPACE)
-            val automation = instrumentation.uiAutomation
-            val oldFlags = automation.serviceInfo.flags
-            automation.serviceInfo = automation.serviceInfo.apply {
-                flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-            }
-            try {
-                var candidate: android.view.accessibility.AccessibilityNodeInfo? = null
-                val timeout = android.os.SystemClock.uptimeMillis() + 5000
-                while (candidate == null && android.os.SystemClock.uptimeMillis() < timeout) {
-                    for (window in automation.windows) {
-                        val root = window.root ?: continue
-                        if (root.packageName?.toString() != "dev.utmity.titanime") continue
-                        candidate = root.findAccessibilityNodeInfosByText("日本語").firstOrNull {
-                            it.text?.toString() == "日本語" && it.isClickable && it.isVisibleToUser
+            fun tapImeText(label: String) {
+                val automation = instrumentation.uiAutomation
+                val oldFlags = automation.serviceInfo.flags
+                automation.serviceInfo = automation.serviceInfo.apply {
+                    flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+                }
+                try {
+                    var candidate: android.view.accessibility.AccessibilityNodeInfo? = null
+                    val timeout = android.os.SystemClock.uptimeMillis() + 5000
+                    while (candidate == null && android.os.SystemClock.uptimeMillis() < timeout) {
+                        for (window in automation.windows) {
+                            val root = window.root ?: continue
+                            if (root.packageName?.toString() != "dev.utmity.titanime") continue
+                            candidate = root.findAccessibilityNodeInfosByText(label).firstOrNull {
+                                it.text?.toString() == label && it.isClickable && it.isVisibleToUser
+                            }
+                            if (candidate != null) break
                         }
-                        if (candidate != null) break
+                        if (candidate == null) Thread.sleep(100)
                     }
-                    if (candidate == null) Thread.sleep(100)
+                    org.junit.Assert.assertNotNull("Visible, clickable Japanese candidate required", candidate)
+                    val bounds = android.graphics.Rect()
+                    candidate!!.getBoundsInScreen(bounds)
+                    val screen = context.resources.displayMetrics
+                    org.junit.Assert.assertTrue("Candidate must be within screen", !bounds.isEmpty &&
+                        bounds.left >= 0 && bounds.top >= 0 && bounds.right <= screen.widthPixels &&
+                        bounds.bottom <= screen.heightPixels)
+                    requireTestFocus()
+                    val now = android.os.SystemClock.uptimeMillis()
+                    for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                        val touch = android.view.MotionEvent.obtain(now, android.os.SystemClock.uptimeMillis(),
+                            action, bounds.exactCenterX(), bounds.exactCenterY(), 0)
+                        touch.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                        org.junit.Assert.assertTrue("Candidate touch injection", automation.injectInputEvent(touch, true))
+                        touch.recycle()
+                    }
+                    instrumentation.waitForIdleSync()
+                    Thread.sleep(100)
+                } finally {
+                    automation.serviceInfo = automation.serviceInfo.apply { flags = oldFlags }
                 }
-                org.junit.Assert.assertNotNull("Visible, clickable Japanese candidate required", candidate)
-                val bounds = android.graphics.Rect()
-                candidate!!.getBoundsInScreen(bounds)
-                val screen = context.resources.displayMetrics
-                org.junit.Assert.assertTrue("Candidate must be within screen", !bounds.isEmpty &&
-                    bounds.left >= 0 && bounds.top >= 0 && bounds.right <= screen.widthPixels &&
-                    bounds.bottom <= screen.heightPixels)
-                requireTestFocus()
-                val now = android.os.SystemClock.uptimeMillis()
-                for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
-                    val touch = android.view.MotionEvent.obtain(now, android.os.SystemClock.uptimeMillis(),
-                        action, bounds.exactCenterX(), bounds.exactCenterY(), 0)
-                    touch.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
-                    org.junit.Assert.assertTrue("Candidate touch injection", automation.injectInputEvent(touch, true))
-                    touch.recycle()
-                }
-                instrumentation.waitForIdleSync()
-                Thread.sleep(100)
-                expect("日本語", true)
-                key(KeyEvent.KEYCODE_ENTER); expect("日本語", false)
-            } finally {
-                automation.serviceInfo = automation.serviceInfo.apply { flags = oldFlags }
             }
+            tapImeText("日本語")
+            expect("日本語", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("日本語", false)
             clearEditor()
             type("nihongo"); key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
             key(KeyEvent.KEYCODE_ESCAPE); expect("にほんご", true)
@@ -203,6 +207,61 @@ class InputDeviceTest {
                 clearEditor(); type(roman); expect(kana, true)
                 key(KeyEvent.KEYCODE_ENTER); expect(kana, false)
             }
+            clearEditor()
+            type("nihongo"); expect("にほんご", true)
+            instrumentation.runOnMainSync { activity.editor.setSelection(0) }
+            instrumentation.waitForIdleSync()
+            Thread.sleep(150)
+            type("ka"); expect("かにほんご", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("かにほんご", false)
+
+            clearEditor()
+            type("nihongowobenkyousuru")
+            key(KeyEvent.KEYCODE_SPACE)
+            fun highlightedRange(): Pair<Int, Int> {
+                var range = -1 to -1
+                instrumentation.runOnMainSync {
+                    val text = targetEditor.text
+                    val spans = text.getSpans(0, text.length, android.text.style.BackgroundColorSpan::class.java)
+                    org.junit.Assert.assertEquals("Exactly one focused Mozc segment", 1, spans.size)
+                    range = text.getSpanStart(spans[0]) to text.getSpanEnd(spans[0])
+                }
+                return range
+            }
+            val firstSegment = highlightedRange()
+            key(KeyEvent.KEYCODE_DPAD_RIGHT)
+            val secondSegment = highlightedRange()
+            org.junit.Assert.assertTrue("Right must focus a later segment", secondSegment.first > firstSegment.first)
+            key(KeyEvent.KEYCODE_DPAD_LEFT)
+            assertEquals(firstSegment, highlightedRange())
+            tapImeText("次文節")
+            assertEquals(secondSegment, highlightedRange())
+            tapImeText("前文節")
+            assertEquals(firstSegment, highlightedRange())
+            key(KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.META_SHIFT_ON)
+            org.junit.Assert.assertNotEquals("Shift+Right must resize the segment", firstSegment, highlightedRange())
+            var converted = ""
+            instrumentation.runOnMainSync { converted = targetEditor.text.toString() }
+            key(KeyEvent.KEYCODE_ENTER); expect(converted, false)
+
+            clearEditor()
+            type("ka"); expect("か", true)
+            fun focus(editor: android.widget.EditText) {
+                val before = connected.get()
+                targetEditor = editor
+                instrumentation.runOnMainSync { editor.requestFocus() }
+                val timeout = android.os.SystemClock.uptimeMillis() + 10000
+                while (connected.get() == before && android.os.SystemClock.uptimeMillis() < timeout) Thread.sleep(50)
+                org.junit.Assert.assertTrue("New field must connect", connected.get() > before)
+                instrumentation.waitForIdleSync()
+            }
+            focus(activity.secondEditor)
+            type("ki"); expect("き", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("き", false)
+            focus(activity.editor)
+            expect("か", false)
+            type("ku"); expect("かく", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("かく", false)
             key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
         } finally {
             context.unregisterReceiver(receiver)

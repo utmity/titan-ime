@@ -10,6 +10,7 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.Output
+import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.Preedit
 import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.SessionCommand
 import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.KeyEvent as MozcKey
 
@@ -45,7 +46,9 @@ class TitanImeService : InputMethodService() {
         output = Output.getDefaultInstance()
         titanFnDevices.clear()
         consumedKeys.clear()
-        requestHideSelf(0)
+        // Do not enqueue a hide here: it can arrive after the next editor starts
+        // and finish that editor's new composing span. The system owns teardown.
+        refreshStrip(updateVisibility = false)
         super.onFinishInput()
     }
 
@@ -103,6 +106,32 @@ class TitanImeService : InputMethodService() {
         }
     }
 
+    override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int,
+        newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
+        super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
+            currentInputEditorInfo?.packageName == "dev.utmity.titanime.harness") {
+            android.util.Log.i("TitanImeProbe", "selection=$oldSelStart,$oldSelEnd->$newSelStart,$newSelEnd composing=$candidatesStart,$candidatesEnd length=${preedit.length}")
+        }
+        if (preedit.isNotEmpty() && (newSelStart != candidatesEnd || newSelEnd != candidatesEnd || candidatesStart < 0)) {
+            // The editor moved its cursor/selection. Keep the visible text where it
+            // is; committing via commitText here would replace/move the wrong range.
+            currentInputConnection?.finishComposingText()
+            engine?.start()
+            preedit = ""
+            output = Output.getDefaultInstance()
+            refreshStrip()
+        }
+    }
+
+    private fun moveSegment(key: MozcKey.SpecialKey, shift: Boolean = false) {
+        val ic = currentInputConnection ?: return
+        if (!output.preedit.hasHighlightedPosition()) return
+        val event = MozcKey.newBuilder().setSpecialKey(key)
+        if (shift) event.addModifierKeys(MozcKey.ModifierKey.SHIFT)
+        engine?.key(event.build())?.let { applyOutput(ic, it) }
+    }
+
     private fun refreshStrip(updateVisibility: Boolean = true) {
         candidateRow?.apply {
             removeAllViews()
@@ -112,6 +141,16 @@ class TitanImeService : InputMethodService() {
                 setPadding(12, 12, 12, 12)
             })
             val window = output.candidateWindow
+            if (output.preedit.hasHighlightedPosition()) {
+                for ((label, key) in listOf("前文節" to MozcKey.SpecialKey.LEFT, "次文節" to MozcKey.SpecialKey.RIGHT)) {
+                    addView(TextView(this@TitanImeService).apply {
+                        text = label
+                        setTextColor(android.graphics.Color.BLUE)
+                        setPadding(18, 12, 18, 12)
+                        setOnClickListener { moveSegment(key) }
+                    })
+                }
+            }
             if (window.candidateCount == 0) addView(TextView(this@TitanImeService).apply {
                 text = preedit
                 textSize = 18f
@@ -145,7 +184,18 @@ class TitanImeService : InputMethodService() {
         try {
             if (result.hasResult()) ic.commitText(result.result.value, 1)
             val next = result.preedit.segmentList.joinToString("") { it.value }
-            if (next.isNotEmpty()) ic.setComposingText(next, 1)
+            if (next.isNotEmpty()) {
+                val styled = android.text.SpannableString(next)
+                var offset = 0
+                for (segment in result.preedit.segmentList) {
+                    if (segment.annotation == Preedit.Segment.Annotation.HIGHLIGHT) {
+                        styled.setSpan(android.text.style.BackgroundColorSpan(0xFFBBDEFB.toInt()),
+                            offset, offset + segment.value.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    }
+                    offset += segment.value.length
+                }
+                ic.setComposingText(styled, 1)
+            }
             else {
                 if (preedit.isNotEmpty() && !result.hasResult()) ic.setComposingText("", 1)
                 ic.finishComposingText()
@@ -202,6 +252,19 @@ class TitanImeService : InputMethodService() {
             ic.sendKeyEvent(event)
             ic.sendKeyEvent(KeyEvent.changeAction(event, KeyEvent.ACTION_UP))
             return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+            if (output.preedit.hasHighlightedPosition()) {
+                moveSegment(if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) MozcKey.SpecialKey.LEFT else MozcKey.SpecialKey.RIGHT,
+                    event.isShiftPressed)
+                return true
+            }
+            if (preedit.isNotEmpty()) {
+                commitComposition(ic)
+                ic.sendKeyEvent(event)
+                ic.sendKeyEvent(KeyEvent.changeAction(event, KeyEvent.ACTION_UP))
+                return true
+            }
         }
         val special = when (keyCode) {
             KeyEvent.KEYCODE_DEL -> MozcKey.SpecialKey.BACKSPACE
