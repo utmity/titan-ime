@@ -242,6 +242,21 @@ class TitanImeService : InputMethodService() {
                 return true
             }
         }
+        if (japanese && !directField && engine != null) {
+            // Wait for the actual chord key; a modifier alone has no text to commit.
+            if (preedit.isNotEmpty() && (isTitanFn(event) || keyCode == KeyEvent.KEYCODE_SYM ||
+                keyCode == KeyEvent.KEYCODE_FUNCTION || keyCode == KeyEvent.KEYCODE_SHIFT_LEFT ||
+                keyCode == KeyEvent.KEYCODE_SHIFT_RIGHT)) return true
+            val character = event.unicodeChar
+            if (!event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed &&
+                character in 33..126 && !character.toChar().isLetterOrDigit()) {
+                // Use the character actually delivered by Android; never invent a
+                // symbol mapping for an Fn/Sym letter whose character is still a letter.
+                val result = engine!!.key(MozcKey.newBuilder().setKeyCode(character).build())
+                applyOutput(ic, result)
+                return result.consumed
+            }
+        }
         if (event.isSymPressed || event.isFunctionPressed || event.deviceId in titanFnDevices) {
             if (japanese && preedit.isNotEmpty()) {
                 commitComposition(ic)

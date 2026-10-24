@@ -147,6 +147,21 @@ class InputDeviceTest {
             }
             fun type(text: String) { text.forEach { key(KeyEvent.KEYCODE_A + (it - 'a')) } }
             clearEditor()
+            // A modifier press alone must not commit before its punctuation arrives.
+            type("ka")
+            vendorFn(KeyEvent.ACTION_DOWN)
+            try {
+                expect("か", true)
+                key(KeyEvent.KEYCODE_MINUS); expect("かー", true)
+            } finally { vendorFn(KeyEvent.ACTION_UP) }
+            key(KeyEvent.KEYCODE_ENTER); expect("かー", false)
+            clearEditor()
+            type("ka")
+            key(KeyEvent.KEYCODE_SYM, KeyEvent.META_SYM_ON); expect("か", true)
+            key(KeyEvent.KEYCODE_COMMA, KeyEvent.META_SYM_ON); expect("か、", true)
+            key(KeyEvent.KEYCODE_PERIOD, KeyEvent.META_FUNCTION_ON); expect("か、。", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("か、。", false)
+            clearEditor()
             type("nihongo"); expect("にほんご", true)
             key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
             key(KeyEvent.KEYCODE_SPACE)

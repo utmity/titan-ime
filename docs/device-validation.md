@@ -178,3 +178,12 @@ The first expanded injected sequence passed in 35.499 seconds, including Fn-down
 Physical follow-up at 04:44 JST: user confirmed completing Fn/L/H/Shift chords and Enter. Logs show H/L events consumed by the IME, shifted H and L reaching meta 65, composing range retained during resizing, and Enter ending composition. Some H presses preceded Shift and several presses repeated, so this is not an exact scripted segment-range round trip. Exact movement/resize assertions are from instrumentation; no fabricated physical highlight-range claim is made. Local evidence: fn-hl-logcat.txt, fn-hl-fixed-logcat.txt, fn-hl-fixed-final.xml. Capture stopped. No existing IME was removed, and USB/debug/security settings were not changed.
 
 Final rebuilt/reinstalled device regression PASS: OK (1 test), 37.432 seconds. Includes English half-width minus/comma/period/brackets/apostrophe and Japanese punctuation composition. Physical final editor text was 日本語を勉強する without a newline. Starting Titan default restored.
+
+
+## Modified punctuation follow-up — 2026-10-25
+
+A new device regression reproduced premature commitment on the vendor Fn down event alone: after ka, the composing-span assertion failed before punctuation was pressed (test-results/20261025-045015). Modifier-only Fn/Sym/Function/Shift presses now preserve an active composition. Actual ASCII punctuation reported by Android, including Sym/Function-modified punctuation, enters Mozc before the modified-letter bypass. Ctrl/Alt/Meta shortcuts retain their prior route; no speculative Fn-letter-to-symbol map was added.
+
+Rebuilt/reinstalled regression PASS: OK (1 test), 39.036 seconds (test-results/20261025-045112). Vendor Fn down preserves か, then minus produces composing かー; Sym down preserves か, Sym+comma and Function+period produce composing か、。. All earlier English punctuation, modified-letter forwarding, Fn segment navigation, kana-kanji conversion, candidate selection and lifecycle tests passed in the same sequence. Local Lint and unsigned Release passed; starting Titan default restored.
+
+These new symbol combinations are injected Android events, not new physical key observations. They verify handling of a punctuation character actually delivered by Android; physical Fn/Sym letter keys that still report letters are deliberately not remapped.
