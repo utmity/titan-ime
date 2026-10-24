@@ -163,3 +163,18 @@ Expanded USB-device instrumentation passed in 31.655 seconds (test-results/20261
 - Compose pending n, press Left: Mozc resolves it to ん; subsequent ka inserts before it, producing かん.
 
 All prior conversion, candidate touch, segment navigation/resizing, modifier routing and two-field lifecycle assertions passed in the same run. This is injected Android input with programmatic editor range selection, not a physical keyboard/selection-gesture test or validation of other apps.
+
+
+## Japanese punctuation and T2E segment chords — 2026-10-25
+
+Japanese printable punctuation now enters Mozc instead of forcing commitment and forwarding an ASCII key. Injected native-engine tests establish minus → ー, comma → 、, period → 。, left/right brackets → 「/」, with composing spans retained through following ka and Enter. Digits retain the existing direct-input policy. Other printable punctuation/quotes uses Mozc's own handling rather than a second mapping table. English input remains direct.
+
+Read-only device inspection of /system/usr/keylayout/TitanKey.kl found H scan 35, L scan 38, Shift scan 42, Sym scan 253 (AGUI_SYM), Fn scan 251 (FUNC3). Physical capture and Android logs confirm Fn=403/251, H=36/35, L=40/38; Fn has no standard meta flag, while held left Shift produces meta 65. The requested chords reached the harness/IME, with no observed app switch. This is evidence for this device/configuration, not a guarantee against every user-defined system shortcut.
+
+Conversion-only Fn+H/L moves focus; Fn+Shift+H/L shrinks/expands. Fn and Shift down no longer trigger the modifier bypass commitment while converting. Outside conversion, prior modifier forwarding remains. SegmentBindings separates replaceable binding data and action resolution from Mozc routing; no settings UI is claimed.
+
+The first expanded injected sequence passed in 35.499 seconds, including Fn-down then H/L, actual Shift-key events plus shifted H/L, segment-range assertions, release cleanup, and all previous regressions. Local app/harness Lint and unsigned Release passed.
+
+Physical follow-up at 04:44 JST: user confirmed completing Fn/L/H/Shift chords and Enter. Logs show H/L events consumed by the IME, shifted H and L reaching meta 65, composing range retained during resizing, and Enter ending composition. Some H presses preceded Shift and several presses repeated, so this is not an exact scripted segment-range round trip. Exact movement/resize assertions are from instrumentation; no fabricated physical highlight-range claim is made. Local evidence: fn-hl-logcat.txt, fn-hl-fixed-logcat.txt, fn-hl-fixed-final.xml. Capture stopped. No existing IME was removed, and USB/debug/security settings were not changed.
+
+Final rebuilt/reinstalled device regression PASS: OK (1 test), 37.432 seconds. Includes English half-width minus/comma/period/brackets/apostrophe and Japanese punctuation composition. Physical final editor text was 日本語を勉強する without a newline. Starting Titan default restored.

@@ -66,6 +66,12 @@ class InputDeviceTest {
                     assertEquals("Composing span for '$text'", composing, BaseInputConnection.getComposingSpanStart(targetEditor.text) >= 0)
                 }
             }
+            for ((code, symbol) in listOf(KeyEvent.KEYCODE_MINUS to "-", KeyEvent.KEYCODE_COMMA to ",",
+                KeyEvent.KEYCODE_PERIOD to ".", KeyEvent.KEYCODE_LEFT_BRACKET to "[", KeyEvent.KEYCODE_RIGHT_BRACKET to "]",
+                KeyEvent.KEYCODE_APOSTROPHE to "'")) {
+                key(code); expect(symbol, false)
+                key(KeyEvent.KEYCODE_DEL); expect("", false)
+            }
             key(KeyEvent.KEYCODE_A); expect("a", false)
             key(KeyEvent.KEYCODE_DEL); expect("", false)
             key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
@@ -112,11 +118,11 @@ class InputDeviceTest {
             expect("か\nんbaaかんakaaか", false)
             key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
             var expected = "か\nんbaaかんakaaか"
-            for ((code, symbol) in listOf(KeyEvent.KEYCODE_PERIOD to ".", KeyEvent.KEYCODE_COMMA to ",", KeyEvent.KEYCODE_1 to "1")) {
+            for ((code, symbol) in listOf(KeyEvent.KEYCODE_PERIOD to "。", KeyEvent.KEYCODE_COMMA to "、", KeyEvent.KEYCODE_MINUS to "ー", KeyEvent.KEYCODE_LEFT_BRACKET to "「", KeyEvent.KEYCODE_RIGHT_BRACKET to "」", KeyEvent.KEYCODE_1 to "1")) {
                 key(KeyEvent.KEYCODE_N)
                 key(code)
                 expected += "ん$symbol"
-                expect(expected, false)
+                expect(expected, code != KeyEvent.KEYCODE_1)
                 key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A)
                 expected += "か"
                 expect(expected, true)
@@ -253,6 +259,19 @@ class InputDeviceTest {
                 return range
             }
             val firstSegment = highlightedRange()
+            vendorFn(KeyEvent.ACTION_DOWN)
+            try {
+                key(KeyEvent.KEYCODE_L)
+                org.junit.Assert.assertTrue(highlightedRange().first > firstSegment.first)
+                key(KeyEvent.KEYCODE_H)
+                assertEquals(firstSegment, highlightedRange())
+                key(KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.META_SHIFT_ON)
+                key(KeyEvent.KEYCODE_L, KeyEvent.META_SHIFT_ON)
+                org.junit.Assert.assertNotEquals(firstSegment, highlightedRange())
+                key(KeyEvent.KEYCODE_H, KeyEvent.META_SHIFT_ON)
+                assertEquals(firstSegment, highlightedRange())
+            } finally { vendorFn(KeyEvent.ACTION_UP) }
+
             key(KeyEvent.KEYCODE_DPAD_RIGHT)
             val secondSegment = highlightedRange()
             org.junit.Assert.assertTrue("Right must focus a later segment", secondSegment.first > firstSegment.first)

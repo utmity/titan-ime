@@ -16,6 +16,7 @@ import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.KeyEvent as 
 
 /** Physical routing belongs here; Japanese composition and conversion belong to Mozc. */
 class TitanImeService : InputMethodService() {
+    private val segmentBindings = SegmentBindings()
     private var engine: MozcEngine? = null
     private var japanese = false
     private var directField = false
@@ -229,6 +230,18 @@ class TitanImeService : InputMethodService() {
             android.util.Log.i("TitanImeProbe", "key=$keyCode meta=${event.metaState} japanese=$japanese connected=${currentInputConnection != null}")
         }
         val ic = currentInputConnection ?: return super.onKeyDown(keyCode, event)
+        if (japanese && !directField && output.preedit.hasHighlightedPosition()) {
+            // Modifier down must not commit conversion before its chord arrives.
+            if (isTitanFn(event) || keyCode == KeyEvent.KEYCODE_FUNCTION ||
+                keyCode == KeyEvent.KEYCODE_SHIFT_LEFT || keyCode == KeyEvent.KEYCODE_SHIFT_RIGHT) return true
+            val action = segmentBindings.resolve(event, event.isFunctionPressed || event.deviceId in titanFnDevices)
+            if (action != null) {
+                moveSegment(if (action == SegmentAction.PREVIOUS || action == SegmentAction.SHRINK)
+                    MozcKey.SpecialKey.LEFT else MozcKey.SpecialKey.RIGHT,
+                    action == SegmentAction.SHRINK || action == SegmentAction.EXPAND)
+                return true
+            }
+        }
         if (event.isSymPressed || event.isFunctionPressed || event.deviceId in titanFnDevices) {
             if (japanese && preedit.isNotEmpty()) {
                 commitComposition(ic)
@@ -290,7 +303,7 @@ class TitanImeService : InputMethodService() {
         val unicode = event.unicodeChar
         if (unicode in 1..127) {
             val c = unicode.toChar()
-            if (c.isLetter()) {
+            if (!c.isDigit()) {
                 val result = engine!!.key(MozcKey.newBuilder().setKeyCode(c.lowercaseChar().code).build())
                 applyOutput(ic, result)
                 return result.consumed

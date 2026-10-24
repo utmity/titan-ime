@@ -8,16 +8,29 @@ Mozc owns Japanese romaji, composition, conversion and candidates. Titan owns An
 
 Basic kana-kanji conversion and editor stability take priority over settings and additional shortcuts. See [integration decisions, OSS licenses and build requirements](docs/mozc-integration.md) and [device validation](docs/device-validation.md).
 
-## Input
+## 操作一覧（実装済み）
 
-- Ctrl+Shift+J toggles English/Japanese. Ctrl+Space is reserved by Android for IME switching on the tested device.
-- Type romaji, press Space to convert, then Space again to advance candidates. The candidate strip also supports touch selection.
-- Enter commits composing/converting text without sending an Enter to the editor. Press Enter again for the editor's normal action.
-- During conversion, Left/Right or the 前文節/次文節 strip controls move segment focus; Shift+Left/Right changes segment length. The focused segment is highlighted.
-- Moving the editor cursor finalizes the visible composition and starts subsequent input at the new selection. Before conversion, Left/Right commits the reading and moves the editor cursor.
-- Escape returns from conversion to the reading; Backspace edits through Mozc.
-- Sym/function-modified keys pass through after committing pending text. The observed Titan Fn pair (key 403 / scan 251) is tracked per device because Fn+A has no standard modifier flag. No symbol remapping is supplied.
-- Password and non-text fields use direct input. Learning is disabled for this initial integration. The app has no network permission.
+| 機能 | 操作 | 動作・条件 |
+| --- | --- | --- |
+| 日英切り替え | Ctrl+Shift+J | Ctrl+SpaceはAndroidのIME切り替え用 |
+| 日本語入力 | ローマ字 | Mozcでかな入力。独自変換器は使用しない |
+| 記号 | `-` / `,` / `.` | 日本語モードで `ー` / `、` / `。`。未確定のままMozcへ入力 |
+| 括弧 | `[` / `]` | 日本語モードで `「` / `」`。その他の引用符・記号もMozcへ渡す |
+| 漢字変換・候補送り | Space | 入力中は変換、変換中は次候補 |
+| 候補選択 | 候補をタップ | 選択後Enterで確定 |
+| 前／次文節 | Fn+H / Fn+L | **変換中のみ**。選択文節を青背景で表示 |
+| 文節を縮める／伸ばす | Fn+Shift+H / Fn+Shift+L | **FnとShiftを先に押してからH/L**。変換中のみ |
+| 文節のタップ移動 | 前文節 / 次文節 | 候補欄のボタン |
+| 外付け矢印キー | 左右 / Shift+左右 | 文節移動／文節長変更。T2Eには独立した矢印キーなし |
+| 確定 | Enter | 未確定文字だけを確定。もう一度Enterで改行・編集欄の操作 |
+| 読みに戻す | Escape | 変換を取り消す |
+| 削除 | Backspace | Mozcの未確定文字を編集 |
+| カーソル・範囲選択 | 編集欄を操作 | 表示中の文字を確定し、新しい位置／選択範囲から入力 |
+| 英語モード | 通常のキー入力 | 記号を含め半角の直接入力 |
+
+Fn文節操作は変換中に限定しています。その他のFn/Sym入力は従来どおり通過します（未確定文字があれば確定）。端末がSym/Fn経由で文字ではなく修飾付きキーを送る場合もこの通過処理になります。数字は従来どおり半角の直接入力です。
+
+キー割り当ては `SegmentBindings` のデータとして処理から分離しています。将来の設定画面で置き換えられる構造ですが、設定画面自体は未実装です。パスワード・非テキスト欄は直接入力、学習は無効、ネットワーク権限はありません。
 
 ## Build and device tests (Windows)
 
