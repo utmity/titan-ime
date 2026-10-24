@@ -216,6 +216,30 @@ class InputDeviceTest {
             key(KeyEvent.KEYCODE_ENTER); expect("かにほんご", false)
 
             clearEditor()
+            // External ranges must replace only the selection, in reading and conversion.
+            for (convert in listOf(false, true)) {
+                type("nihongo")
+                if (convert) key(KeyEvent.KEYCODE_SPACE)
+                instrumentation.runOnMainSync { activity.editor.setSelection(0, 2) }
+                instrumentation.waitForIdleSync()
+                Thread.sleep(150)
+                type("ka")
+                val replacement = if (convert) "か語" else "かんご"
+                expect(replacement, true)
+                key(KeyEvent.KEYCODE_ENTER); expect(replacement, false)
+                clearEditor()
+            }
+            // Before conversion, arrows commit the reading and move the editor caret.
+            type("kana")
+            key(KeyEvent.KEYCODE_DPAD_LEFT); expect("かな", false)
+            type("ki"); expect("かきな", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("かきな", false)
+            clearEditor()
+            type("n")
+            key(KeyEvent.KEYCODE_DPAD_LEFT); expect("ん", false)
+            type("ka"); expect("かん", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("かん", false)
+            clearEditor()
             type("nihongowobenkyousuru")
             key(KeyEvent.KEYCODE_SPACE)
             fun highlightedRange(): Pair<Int, Int> {

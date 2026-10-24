@@ -151,3 +151,15 @@ Conversion now highlights the focused Mozc segment. Left/Right and the 前文節
 These new cases use Android event injection and editor callbacks on the USB device, not user physical presses. Switching to other apps remains unverified. The harness contains two separate multiline editors for lifecycle testing.
 
 Expanded device regression PASS: OK (1 test), 26.492 seconds, test-results/20261025-041926. Includes visible touch targets for previous/next segment, Shift+Right resizing, and all earlier input/conversion cases. Debug APK was rebuilt and installed; starting Titan IME selection was restored. Local app Lint, unsigned Release and harness test-APK builds passed. Play Protect requested sending the harness APK; the one-time Do not send action was selected, with no external upload or permanent setting change.
+
+
+## Range replacement and reading cursor regression — 2026-10-25
+
+Expanded USB-device instrumentation passed in 31.655 seconds (test-results/20261025-043123). Rebuilt and reinstalled Debug/test APKs; the runner restored the starting Titan selection. No additional IME implementation change was needed.
+
+- Compose にほんご, select [0,2), type ka: かんご, with only the replacement composing; Enter commits it.
+- Convert to 日本語, select [0,2), type ka: か語, with only the replacement composing; Enter commits it.
+- Compose かな, press Left: reading commits; type ki inserts at the caret, producing かきな.
+- Compose pending n, press Left: Mozc resolves it to ん; subsequent ka inserts before it, producing かん.
+
+All prior conversion, candidate touch, segment navigation/resizing, modifier routing and two-field lifecycle assertions passed in the same run. This is injected Android input with programmatic editor range selection, not a physical keyboard/selection-gesture test or validation of other apps.
