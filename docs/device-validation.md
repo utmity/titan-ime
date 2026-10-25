@@ -223,3 +223,19 @@ Limitations: non-collapsed range replacement does not retain the Mozc compositio
 
 
 Physical fixed-APK verification at 18:23 JST: tapping before ご changed selection 4→3 while composing stayed [0,4). Physical K/A inserted within that range; Backspace restored it, Space converted and Enter committed 日本語. The user then accidentally used Fn+I/N, adding literal in (reported by the user and confirmed in events). Subsequent actual Alt+I/N/M (meta 18) created a single composing range growing [5,6) → [5,7) → [5,8), then Enter ended composition. Final UI text was 日本語inー、。. Thus physical cursor editing and physical Alt punctuation succeeded; the extra in is not omitted or attributed to conversion. Evidence: test-results/cursor-symbol-physical-final.txt and .xml. The initial にほんご was prepared by injection; tap/edit/Alt/Enter operations were user physical input. Titan remains selected; enabled IMEs were not altered.
+
+
+## Two-key resizing and local conversion learning — 2026-10-25
+
+Fn+U now shrinks and Fn+O expands the focused conversion segment, in both H/L and J/K navigation profiles. The physical Shift requirement is removed; Mozc still receives its normal Shift+Left/Right internally. Existing stored profile selections automatically use the new two-key resize bindings. Settings and README show the actual chords.
+
+Learning is on by default, using Mozc DEFAULT_HISTORY with incognito disabled. The setting can turn learning off (incognito) without deleting saved data. Password/non-text fields continue bypassing Mozc. History remains in the app-private no-backup profile; input finish requests SYNC_DATA, whose pinned upstream handler performs Engine::Sync and Wait. No custom keystroke log or cloud service is added. Mozc's own storage policies manage history size.
+
+Full device regression PASS: 64.711 seconds, then 64.113 seconds with persistence-test expectations recorded. Deterministic conversion cases run with learning off, then the settings UI enables learning and the test selects a non-first suisei candidate, commits it, starts a fresh session and verifies it becomes the next conversion's first candidate. The final saved test candidate was 水星. All cursor/tap/punctuation/settings tests and Fn+U/O expansion/contraction assertions passed. Local Lint and unsigned Release passed.
+
+Cold persistence test: force-stopped both IME and harness, launched a fresh IME process, and separately ran LearningPersistenceTest. PASS, 3.05 seconds: suisei converted first to the recorded 水星 after restart. The app-private .history.db and segment.db files were present; their private contents were not published. The test class is intentionally separate from the full regression to allow a real process restart between runs. Settings were left at learning on, Fn+Space and H/L navigation.
+
+An initial input-ready timeout was resolved by stopping the old harness process before the test; it is not counted as a passing run. The enabled IME list remained unchanged.
+
+
+Physical two-key check at 23:19 JST: Fn+O delivered key 43 without Shift (meta 0), changed the composing range length 8→9; Fn+U delivered key 49/meta 0 and returned length 9→8. Enter then committed. No app switch occurred. Final candidate text was 日本語を便供する: segment resizing may reselect conversion candidates, so this is not claimed as unchanged wording. Exact segment-span expansion/contraction is separately asserted in instrumentation. Physical evidence: test-results/two-key-physical.txt and .xml. Learning remains enabled.

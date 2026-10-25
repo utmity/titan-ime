@@ -41,8 +41,9 @@ class SettingsActivity : Activity() {
             content.addView(group)
         }
         choices("日英切り替え（保存後すぐ反映）", listOf("fn" to "Fn+Space（標準）", "sym" to "Sym+Space", "alt" to "Alt+Space"), preferences.toggle) { preferences.toggle = it }
-        choices("文節操作（変換中のみ）", listOf("hl" to "Fn+H/L：前/次・Shift併用：縮小/拡大", "jk" to "Fn+J/K：前/次・Shift併用：縮小/拡大"), preferences.segments) { preferences.segments = it }
-        text("Space：変換・次候補\nEnter：確定（再度で改行）\nBackspace：削除\n記号 - , . → ー 、 。\n文節長変更はFnとShiftを先に押します。\nCtrl+Shift+Jは廃止しました。\n端末独自のショートカットが優先される場合は別の切替を選んでください。\nパスワード・数字欄は直接入力です。")
+        choices("文節操作（変換中のみ）", listOf("hl" to "Fn+H/L：前/次・Fn+U/O：縮小/拡大", "jk" to "Fn+J/K：前/次・Fn+U/O：縮小/拡大"), preferences.segments) { preferences.segments = it }
+        choices("端末内の変換学習", listOf("on" to "変換学習オン", "off" to "変換学習オフ"), if (preferences.learning) "on" else "off") { preferences.learning = it == "on" }
+        text("Space：変換・次候補\nEnter：確定（再度で改行）\nBackspace：削除\n記号 - , . → ー 、 。\n文節長変更はFn+U（縮小）/Fn+O（拡大）。\nCtrl+Shift+Jは廃止しました。\n端末独自のショートカットが優先される場合は別の切替を選んでください。\nパスワード・数字欄は直接入力です。\n学習は端末内のみ。オフでも保存済み履歴は消しません。")
         setContentView(ScrollView(this).apply { addView(content) })
     }
     override fun onResume() {

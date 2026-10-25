@@ -5,6 +5,9 @@ import android.view.KeyEvent
 
 internal class ImePreferences(context: Context) {
     val store = context.getSharedPreferences("ime_settings", Context.MODE_PRIVATE)
+    var learning: Boolean
+        get() = store.getBoolean("learning", true)
+        set(value) { store.edit().putBoolean("learning", value).apply() }
     var toggle: String
         get() = store.getString("toggle", "fn") ?: "fn"
         set(value) { store.edit().putString("toggle", value).apply() }
@@ -27,7 +30,7 @@ internal class ImePreferences(context: Context) {
         return SegmentBindings(listOf(
             SegmentBinding(KeyEvent.KEYCODE_J, false, SegmentAction.PREVIOUS),
             SegmentBinding(KeyEvent.KEYCODE_K, false, SegmentAction.NEXT),
-            SegmentBinding(KeyEvent.KEYCODE_J, true, SegmentAction.SHRINK),
-            SegmentBinding(KeyEvent.KEYCODE_K, true, SegmentAction.EXPAND)))
+            SegmentBinding(KeyEvent.KEYCODE_U, false, SegmentAction.SHRINK),
+            SegmentBinding(KeyEvent.KEYCODE_O, false, SegmentAction.EXPAND)))
     }
 }

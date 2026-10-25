@@ -45,6 +45,7 @@ class TitanImeService : InputMethodService() {
 
     override fun onFinishInput() {
         engine?.close()
+        engine?.sync()
         preedit = ""
         compositionStart = -1
         output = Output.getDefaultInstance()
@@ -92,6 +93,7 @@ class TitanImeService : InputMethodService() {
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
+        engine?.setLearning(preferences.learning)
         engine?.start()
         preedit = ""
         compositionStart = -1

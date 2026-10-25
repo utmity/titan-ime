@@ -9,6 +9,7 @@ import java.io.File
 /** One main-thread session. Mozc owns romaji, preedit, segmentation and candidates. */
 class MozcEngine(context: Context) {
     private var session = 0L
+    private var learningEnabled = ImePreferences(context).learning
     init {
         val data = File(context.filesDir, "mozc-c4b2aef.data")
         if (!data.exists()) {
@@ -19,9 +20,10 @@ class MozcEngine(context: Context) {
         val profile = File(context.noBackupFilesDir, "mozc").apply { mkdirs() }
         check(MozcJni.onPostLoad(profile.path, data.path))
         check(MozcJni.getDataVersion().isNotBlank()) { "Mozc dictionary did not load" }
-        // Keep learning disabled for the initial integration, including sensitive fields.
+        // Sensitive fields bypass the engine; ordinary conversion may learn locally.
         val config = evaluate(Input.newBuilder().setType(Input.CommandType.GET_CONFIG)).config.toBuilder()
-            .setSessionKeymap(Config.SessionKeymap.MSIME).setIncognitoMode(true)
+            .setSessionKeymap(Config.SessionKeymap.MSIME).setIncognitoMode(!learningEnabled)
+            .setHistoryLearningLevel(Config.HistoryLearningLevel.DEFAULT_HISTORY)
             .setAutoSwitchCompositionMode(false)
         config.customRomanTable = context.assets.open("romanji-hiragana.tsv").use {
             com.google.protobuf.ByteString.readFrom(it)
@@ -36,6 +38,16 @@ class MozcEngine(context: Context) {
 
     private fun evaluate(input: Input.Builder): Output = Command.parseFrom(
         MozcJni.evalCommand(Command.newBuilder().setInput(input).build().toByteArray())).output
+
+    fun setLearning(enabled: Boolean) {
+        if (enabled == learningEnabled) return
+        val config = evaluate(Input.newBuilder().setType(Input.CommandType.GET_CONFIG)).config.toBuilder()
+            .setIncognitoMode(!enabled).setHistoryLearningLevel(Config.HistoryLearningLevel.DEFAULT_HISTORY)
+        evaluate(Input.newBuilder().setType(Input.CommandType.SET_CONFIG).setConfig(config))
+        learningEnabled = enabled
+    }
+
+    fun sync() { evaluate(Input.newBuilder().setType(Input.CommandType.SYNC_DATA)) }
 
     fun start() {
         close()

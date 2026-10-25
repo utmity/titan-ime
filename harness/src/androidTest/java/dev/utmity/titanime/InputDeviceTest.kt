@@ -82,6 +82,25 @@ class InputDeviceTest {
                 vendorFn(KeyEvent.ACTION_DOWN)
                 try { key(KeyEvent.KEYCODE_SPACE) } finally { vendorFn(KeyEvent.ACTION_UP) }
             }
+            fun chooseSetting(label: String) {
+                context.startActivity(Intent().setClassName("dev.utmity.titanime", "dev.utmity.titanime.SettingsActivity")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                val deadline = android.os.SystemClock.uptimeMillis() + 10000
+                var selected = false
+                while (!selected && android.os.SystemClock.uptimeMillis() < deadline) {
+                    val root = instrumentation.uiAutomation.rootInActiveWindow
+                    val node = root?.findAccessibilityNodeInfosByText(label)?.firstOrNull { it.text?.toString() == label }
+                    if (node != null) selected = node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                    if (!selected) Thread.sleep(100)
+                }
+                org.junit.Assert.assertTrue("Settings control available: $label", selected)
+                Thread.sleep(200)
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+                instrumentation.waitForIdleSync()
+                Thread.sleep(400)
+                requireTestFocus()
+            }
+            chooseSetting("変換学習オフ")
             if (initialJapanese.get()) toggle()
             for ((code, symbol) in listOf(KeyEvent.KEYCODE_MINUS to "-", KeyEvent.KEYCODE_COMMA to ",",
                 KeyEvent.KEYCODE_PERIOD to ".", KeyEvent.KEYCODE_LEFT_BRACKET to "[", KeyEvent.KEYCODE_RIGHT_BRACKET to "]",
@@ -358,10 +377,9 @@ class InputDeviceTest {
                 org.junit.Assert.assertTrue(highlightedRange().first > firstSegment.first)
                 key(KeyEvent.KEYCODE_H)
                 assertEquals(firstSegment, highlightedRange())
-                key(KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.META_SHIFT_ON)
-                key(KeyEvent.KEYCODE_L, KeyEvent.META_SHIFT_ON)
+                key(KeyEvent.KEYCODE_O)
                 org.junit.Assert.assertNotEquals(firstSegment, highlightedRange())
-                key(KeyEvent.KEYCODE_H, KeyEvent.META_SHIFT_ON)
+                key(KeyEvent.KEYCODE_U)
                 assertEquals(firstSegment, highlightedRange())
             } finally { vendorFn(KeyEvent.ACTION_UP) }
 
@@ -403,24 +421,6 @@ class InputDeviceTest {
             key(KeyEvent.KEYCODE_ENTER); expect("かく", false)
             toggle()
             // Exercise the exported settings UI and immediate preference-to-key routing.
-            fun chooseSetting(label: String) {
-                context.startActivity(Intent().setClassName("dev.utmity.titanime", "dev.utmity.titanime.SettingsActivity")
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                val deadline = android.os.SystemClock.uptimeMillis() + 10000
-                var selected = false
-                while (!selected && android.os.SystemClock.uptimeMillis() < deadline) {
-                    val root = instrumentation.uiAutomation.rootInActiveWindow
-                    val node = root?.findAccessibilityNodeInfosByText(label)?.firstOrNull { it.text?.toString() == label }
-                    if (node != null) selected = node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
-                    if (!selected) Thread.sleep(100)
-                }
-                org.junit.Assert.assertTrue("Settings control available: $label", selected)
-                Thread.sleep(200)
-                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-                instrumentation.waitForIdleSync()
-                Thread.sleep(400)
-                requireTestFocus()
-            }
             chooseSetting("Sym+Space")
             clearEditor()
             key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_SYM_ON)
@@ -433,7 +433,7 @@ class InputDeviceTest {
             type("ka"); expect("か", true)
             key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_ALT_ON); expect("か", false)
             chooseSetting("Fn+Space（標準）")
-            chooseSetting("Fn+J/K：前/次・Shift併用：縮小/拡大")
+            chooseSetting("Fn+J/K：前/次・Fn+U/O：縮小/拡大")
             clearEditor(); toggle()
             type("nihongowobenkyousuru"); key(KeyEvent.KEYCODE_SPACE)
             val initial = highlightedRange()
@@ -442,13 +442,24 @@ class InputDeviceTest {
                 key(KeyEvent.KEYCODE_K)
                 org.junit.Assert.assertTrue(highlightedRange().first > initial.first)
                 key(KeyEvent.KEYCODE_J); assertEquals(initial, highlightedRange())
-                key(KeyEvent.KEYCODE_K, KeyEvent.META_SHIFT_ON)
+                key(KeyEvent.KEYCODE_O)
                 org.junit.Assert.assertNotEquals(initial, highlightedRange())
-                key(KeyEvent.KEYCODE_J, KeyEvent.META_SHIFT_ON)
+                key(KeyEvent.KEYCODE_U)
                 assertEquals(initial, highlightedRange())
             } finally { vendorFn(KeyEvent.ACTION_UP) }
             key(KeyEvent.KEYCODE_ENTER); toggle()
-            chooseSetting("Fn+H/L：前/次・Shift併用：縮小/拡大")
+            chooseSetting("Fn+H/L：前/次・Fn+U/O：縮小/拡大")
+            chooseSetting("変換学習オン")
+            clearEditor(); toggle()
+            type("suisei"); key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_SPACE)
+            var learned = ""
+            instrumentation.runOnMainSync { learned = targetEditor.text.toString() }
+            key(KeyEvent.KEYCODE_ENTER); expect(learned, false)
+            context.getSharedPreferences("test_expectations", 0).edit().putString("suisei", learned).commit()
+            clearEditor(); type("suisei"); key(KeyEvent.KEYCODE_SPACE)
+            expect(learned, true)
+            key(KeyEvent.KEYCODE_ENTER); toggle()
+
 
         } finally {
             context.unregisterReceiver(receiver)
