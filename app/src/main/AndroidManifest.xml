@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application android:label="Titan IME" android:allowBackup="false">
+        <activity android:name=".SettingsActivity" android:label="Titan IME 設定" android:exported="true" />
         <service android:name=".TitanImeService" android:label="Titan IME"
             android:permission="android.permission.BIND_INPUT_METHOD" android:exported="true">
             <intent-filter><action android:name="android.view.InputMethod" /></intent-filter>

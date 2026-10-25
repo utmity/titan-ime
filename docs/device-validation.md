@@ -187,3 +187,16 @@ A new device regression reproduced premature commitment on the vendor Fn down ev
 Rebuilt/reinstalled regression PASS: OK (1 test), 39.036 seconds (test-results/20261025-045112). Vendor Fn down preserves か, then minus produces composing かー; Sym down preserves か, Sym+comma and Function+period produce composing か、。. All earlier English punctuation, modified-letter forwarding, Fn segment navigation, kana-kanji conversion, candidate selection and lifecycle tests passed in the same sequence. Local Lint and unsigned Release passed; starting Titan default restored.
 
 These new symbol combinations are injected Android events, not new physical key observations. They verify handling of a punctuation character actually delivered by Android; physical Fn/Sym letter keys that still report letters are deliberately not remapped.
+
+
+## IME settings and two-key mode switching — 2026-10-25
+
+Before work, GitHub main remained 1da9d397 and PR #1 remained open/unmerged at 04ec52c9, matching the checkout. Changes continue on the existing PR branch. Previous complete native-device regression was 39.036 seconds with CI passing.
+
+Physical candidate survey at 11:13 JST: Fn+Space reached the IME as vendor Fn 403/251 followed by Space 62/57 with meta 0; Sym+Space reached Space with meta 4; Alt+Space reached Space with meta 18. The user confirmed performing all three. Logs remained in the harness with Titan selected; no app switch was observed. This verifies delivery on this configuration, not every possible customized Android shortcut. Fn+Space was selected as default; Ctrl+Shift+J is removed.
+
+SettingsActivity is registered through the input-method XML settingsActivity attribute. The actual Android screen-keyboard settings list opened Titan's dedicated settings when its label was tapped (not its enabled switch). The screen shows current saved EN/JA mode, three toggle choices, H/L or J/K segment profiles and main operations. Preferences save immediately; the running IME resolves them per key event. Segment movement and resizing change together as a collision-free profile, not arbitrary individual shortcuts. Mode and assignments are private SharedPreferences; no IME enable/default settings are modified by the screen.
+
+Expanded full device instrumentation passed in 51.157 seconds: it opened the real settings UI, selected Sym+Space and Alt+Space, verified Japanese composition and commitment on switching, selected J/K and asserted segment movement plus resizing, then restored Fn+Space/H/L/English. Existing conversion, punctuation, candidate touch, modifier handling and lifecycle tests passed. Local app/harness Lint and unsigned Release passed.
+
+Process restart persistence: selected Sym+Space/J/K through the UI, temporarily selected PhysiBoard, force-stopped Titan, reopened settings, and verified both radio selections and the saved preference XML survived. A subsequent immediate shell-keycombination input attempt ran before a usable connection and did not establish post-restart switching; it is not counted as a successful input test. Standard choices were restored through the settings UI and Titan reselected. Physical survey logs and settings XML snapshots are local under test-results/.

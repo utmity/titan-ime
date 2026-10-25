@@ -6,13 +6,13 @@ Physical-keyboard-first Android IME for Unihertz Titan 2 Elite, with on-device M
 
 Mozc owns Japanese romaji, composition, conversion and candidates. Titan owns Android editor updates and physical-key routing. The custom Kotlin romaji converter has been removed; its regression cases now run against Mozc on the device.
 
-Basic kana-kanji conversion and editor stability take priority over settings and additional shortcuts. See [integration decisions, OSS licenses and build requirements](docs/mozc-integration.md) and [device validation](docs/device-validation.md).
+Kana-kanji conversion, editor stability and usable physical-key settings are the current priorities. See [integration decisions, OSS licenses and build requirements](docs/mozc-integration.md) and [device validation](docs/device-validation.md).
 
 ## 操作一覧（実装済み）
 
 | 機能 | 操作 | 動作・条件 |
 | --- | --- | --- |
-| 日英切り替え | Ctrl+Shift+J | Ctrl+SpaceはAndroidのIME切り替え用 |
+| 日英切り替え | **Fn+Space（標準）** | 設定でSym+Space／Alt+Spaceへ変更可。Ctrl+Shift+Jは廃止 |
 | 日本語入力 | ローマ字 | Mozcでかな入力。独自変換器は使用しない |
 | 記号 | `-` / `,` / `.` | 日本語モードで `ー` / `、` / `。`。未確定のままMozcへ入力 |
 | 括弧 | `[` / `]` | 日本語モードで `「` / `」`。その他の引用符・記号もMozcへ渡す |
@@ -30,13 +30,25 @@ Basic kana-kanji conversion and editor stability take priority over settings and
 
 Fn文節操作は変換中に限定しています。Fn/Sym経由でもAndroidから実際のASCII記号が届けばMozcへ入力します。修飾キー単独では未確定文字を確定しません。文字キーのまま届く未割り当てのFn/Sym入力は従来どおり通過し、その時点で未確定文字を確定します。独自のFn/Sym記号配置は追加していません。数字は従来どおり半角の直接入力です。
 
-キー割り当ては `SegmentBindings` のデータとして処理から分離しています。将来の設定画面で置き換えられる構造ですが、設定画面自体は未実装です。パスワード・非テキスト欄は直接入力、学習は無効、ネットワーク権限はありません。
+キー割り当ては `SegmentBindings` のデータとして処理から分離しています。設定画面からH/L系とJ/K系を切り替えられます。パスワード・非テキスト欄は直接入力、学習は無効、ネットワーク権限はありません。
+
+## 設定画面
+
+Androidの「設定 → システム → キーボード → 画面キーボード → Titan IME」から専用設定を開けます（端末により項目名が異なります）。AndroidへIMEのsettingsActivityとして登録しています。
+
+- 日英切り替え：Fn+Space（標準）、Sym+Space、Alt+Space。1つを選ぶと即時保存・反映。
+- 文節操作：Fn+H/L（標準）またはFn+J/K。前/次と、Shift併用の縮小/拡大をセットで変更。Spaceと重複しない選択式です。
+- 現在の入力モードと主要操作を表示。モードと割り当てはアプリ再起動後も保持。
+- パスワード・非テキスト欄ではモードにかかわらず直接入力します。設定画面は既定IMEや有効IMEを変更しません。
+- Ctrl+Spaceは引き続きAndroid側のIME切替用です。端末側の独自割り当てにより候補操作が届かない場合は他の候補を選んでください。
 
 ## Build and device tests (Windows)
 
 Use JDK 17, Android SDK 35, and set ANDROID_HOME. The Gradle 8.9 wrapper builds the IME (`app`) and separate editor (`harness`).
 
 First build the pinned engine on Linux/WSL2 with `bash scripts/build-mozc.sh`, or download the mozc-arm64 artifact from a successful trusted GitHub Actions run in this repository. Extract it and run `./scripts/import-mozc.ps1 -Source <extracted-directory>`. The importer checks revision and checksums. Engine and dictionary binaries are ignored by Git; Gradle fails clearly if they are missing. Initial device support is arm64-v8a only.
+
+The full regression assumes English mode, Fn+Space and the H/L segment profile at entry, and returns to those defaults after testing settings.
 
 Run `./scripts/test-device.ps1 -Serial <adb-serial> -InputSequence -SelectTitanIme` to build, install, test and restore the starting IME. Titan must already be enabled. Without -SelectTitanIme, select Titan manually. The runner never enables/disables IMEs or uninstalls packages. Use -SkipInstall to test installed APKs.
 

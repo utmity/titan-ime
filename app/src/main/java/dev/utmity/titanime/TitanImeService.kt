@@ -16,7 +16,7 @@ import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.KeyEvent as 
 
 /** Physical routing belongs here; Japanese composition and conversion belong to Mozc. */
 class TitanImeService : InputMethodService() {
-    private val segmentBindings = SegmentBindings()
+    private val preferences by lazy { ImePreferences(this) }
     private var engine: MozcEngine? = null
     private var japanese = false
     private var directField = false
@@ -28,6 +28,7 @@ class TitanImeService : InputMethodService() {
 
     override fun onCreate() {
         super.onCreate()
+        japanese = preferences.japanese
         try { engine = MozcEngine(this) }
         catch (error: Exception) { android.util.Log.e("TitanImeProbe", "Mozc initialization failed", error) }
         catch (error: LinkageError) { android.util.Log.e("TitanImeProbe", "Mozc native library unavailable", error) }
@@ -230,11 +231,20 @@ class TitanImeService : InputMethodService() {
             android.util.Log.i("TitanImeProbe", "key=$keyCode meta=${event.metaState} japanese=$japanese connected=${currentInputConnection != null}")
         }
         val ic = currentInputConnection ?: return super.onKeyDown(keyCode, event)
+        if (preferences.matchesToggle(event, event.isFunctionPressed || event.deviceId in titanFnDevices)) {
+            if (event.repeatCount == 0 && engine != null && !directField) {
+                if (japanese) commitComposition(ic)
+                japanese = !japanese
+                preferences.japanese = japanese
+                refreshStrip()
+            }
+            return true
+        }
         if (japanese && !directField && output.preedit.hasHighlightedPosition()) {
             // Modifier down must not commit conversion before its chord arrives.
             if (isTitanFn(event) || keyCode == KeyEvent.KEYCODE_FUNCTION ||
                 keyCode == KeyEvent.KEYCODE_SHIFT_LEFT || keyCode == KeyEvent.KEYCODE_SHIFT_RIGHT) return true
-            val action = segmentBindings.resolve(event, event.isFunctionPressed || event.deviceId in titanFnDevices)
+            val action = preferences.segmentBindings().resolve(event, event.isFunctionPressed || event.deviceId in titanFnDevices)
             if (action != null) {
                 moveSegment(if (action == SegmentAction.PREVIOUS || action == SegmentAction.SHRINK)
                     MozcKey.SpecialKey.LEFT else MozcKey.SpecialKey.RIGHT,
@@ -265,14 +275,6 @@ class TitanImeService : InputMethodService() {
                 return true
             }
             return super.onKeyDown(keyCode, event)
-        }
-        if (keyCode == KeyEvent.KEYCODE_J && event.isCtrlPressed && event.isShiftPressed &&
-            !event.isAltPressed && !event.isMetaPressed) {
-            if (event.repeatCount > 0) return true
-            if (japanese) commitComposition(ic)
-            if (engine != null && !directField) japanese = !japanese
-            refreshStrip()
-            return true
         }
         if (!japanese || directField || engine == null) return super.onKeyDown(keyCode, event)
         if (event.isAltPressed || event.isCtrlPressed || event.isMetaPressed) {

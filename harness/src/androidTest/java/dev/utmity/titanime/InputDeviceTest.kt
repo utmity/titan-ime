@@ -66,33 +66,39 @@ class InputDeviceTest {
                     assertEquals("Composing span for '$text'", composing, BaseInputConnection.getComposingSpanStart(targetEditor.text) >= 0)
                 }
             }
-            for ((code, symbol) in listOf(KeyEvent.KEYCODE_MINUS to "-", KeyEvent.KEYCODE_COMMA to ",",
-                KeyEvent.KEYCODE_PERIOD to ".", KeyEvent.KEYCODE_LEFT_BRACKET to "[", KeyEvent.KEYCODE_RIGHT_BRACKET to "]",
-                KeyEvent.KEYCODE_APOSTROPHE to "'")) {
-                key(code); expect(symbol, false)
-                key(KeyEvent.KEYCODE_DEL); expect("", false)
-            }
-            key(KeyEvent.KEYCODE_A); expect("a", false)
-            key(KeyEvent.KEYCODE_DEL); expect("", false)
-            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
-            key(KeyEvent.KEYCODE_K); expect("k", true)
-            key(KeyEvent.KEYCODE_DEL); expect("", false)
-            key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A); expect("か", true)
-            key(KeyEvent.KEYCODE_ENTER); expect("か", false)
-            key(KeyEvent.KEYCODE_ENTER); expect("か\n", false)
-            key(KeyEvent.KEYCODE_N); expect("か\nn", true)
-            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON); expect("か\nん", false)
-            key(KeyEvent.KEYCODE_B); expect("か\nんb", false)
-            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
-            // Synthetic regression using the modifier observed on physical Sym+A.
-            key(KeyEvent.KEYCODE_A, KeyEvent.META_SYM_ON); expect("か\nんba", false)
-            // Reproduce Titan's vendor Fn down/A/up sequence; this is not a physical press.
             fun vendorFn(action: Int) {
                 requireTestFocus()
                 instrumentation.sendKeySync(KeyEvent(0, 0, action, 403, 0, 0, 0, 251))
                 instrumentation.waitForIdleSync()
                 Thread.sleep(100)
             }
+            fun toggle() {
+                vendorFn(KeyEvent.ACTION_DOWN)
+                try { key(KeyEvent.KEYCODE_SPACE) } finally { vendorFn(KeyEvent.ACTION_UP) }
+            }
+            for ((code, symbol) in listOf(KeyEvent.KEYCODE_MINUS to "-", KeyEvent.KEYCODE_COMMA to ",",
+                KeyEvent.KEYCODE_PERIOD to ".", KeyEvent.KEYCODE_LEFT_BRACKET to "[", KeyEvent.KEYCODE_RIGHT_BRACKET to "]",
+                KeyEvent.KEYCODE_APOSTROPHE to "'")) {
+                key(code); expect(symbol, false)
+                key(KeyEvent.KEYCODE_DEL); expect("", false)
+            }
+            // The retired three-key chord must no longer switch the IME mode.
+            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
+            key(KeyEvent.KEYCODE_A); expect("a", false)
+            key(KeyEvent.KEYCODE_DEL); expect("", false)
+            toggle()
+            key(KeyEvent.KEYCODE_K); expect("k", true)
+            key(KeyEvent.KEYCODE_DEL); expect("", false)
+            key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A); expect("か", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("か", false)
+            key(KeyEvent.KEYCODE_ENTER); expect("か\n", false)
+            key(KeyEvent.KEYCODE_N); expect("か\nn", true)
+            toggle(); expect("か\nん", false)
+            key(KeyEvent.KEYCODE_B); expect("か\nんb", false)
+            toggle()
+            // Synthetic regression using the modifier observed on physical Sym+A.
+            key(KeyEvent.KEYCODE_A, KeyEvent.META_SYM_ON); expect("か\nんba", false)
+            // Reproduce Titan's vendor Fn down/A/up sequence; this is not a physical press.
             vendorFn(KeyEvent.ACTION_DOWN)
             try {
                 key(KeyEvent.KEYCODE_A); expect("か\nんbaa", false)
@@ -100,9 +106,9 @@ class InputDeviceTest {
                 vendorFn(KeyEvent.ACTION_UP)
             }
             key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A); expect("か\nんbaaか", true)
-            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
+            toggle()
             expect("か\nんbaaか", false)
-            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
+            toggle()
             key(KeyEvent.KEYCODE_N)
             key(KeyEvent.KEYCODE_A, KeyEvent.META_SYM_ON); expect("か\nんbaaかんa", false)
             key(KeyEvent.KEYCODE_K)
@@ -114,9 +120,9 @@ class InputDeviceTest {
             }
             key(KeyEvent.KEYCODE_A, KeyEvent.META_FUNCTION_ON); expect("か\nんbaaかんakaa", false)
             key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A); expect("か\nんbaaかんakaaか", true)
-            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
+            toggle()
             expect("か\nんbaaかんakaaか", false)
-            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
+            toggle()
             var expected = "か\nんbaaかんakaaか"
             for ((code, symbol) in listOf(KeyEvent.KEYCODE_PERIOD to "。", KeyEvent.KEYCODE_COMMA to "、", KeyEvent.KEYCODE_MINUS to "ー", KeyEvent.KEYCODE_LEFT_BRACKET to "「", KeyEvent.KEYCODE_RIGHT_BRACKET to "」", KeyEvent.KEYCODE_1 to "1")) {
                 key(KeyEvent.KEYCODE_N)
@@ -320,7 +326,55 @@ class InputDeviceTest {
             expect("か", false)
             type("ku"); expect("かく", true)
             key(KeyEvent.KEYCODE_ENTER); expect("かく", false)
-            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
+            toggle()
+            // Exercise the exported settings UI and immediate preference-to-key routing.
+            fun chooseSetting(label: String) {
+                context.startActivity(Intent().setClassName("dev.utmity.titanime", "dev.utmity.titanime.SettingsActivity")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                val deadline = android.os.SystemClock.uptimeMillis() + 10000
+                var selected = false
+                while (!selected && android.os.SystemClock.uptimeMillis() < deadline) {
+                    val root = instrumentation.uiAutomation.rootInActiveWindow
+                    val node = root?.findAccessibilityNodeInfosByText(label)?.firstOrNull { it.text?.toString() == label }
+                    if (node != null) selected = node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                    if (!selected) Thread.sleep(100)
+                }
+                org.junit.Assert.assertTrue("Settings control available: $label", selected)
+                Thread.sleep(200)
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+                instrumentation.waitForIdleSync()
+                Thread.sleep(400)
+                requireTestFocus()
+            }
+            chooseSetting("Sym+Space")
+            clearEditor()
+            key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_SYM_ON)
+            type("ka"); expect("か", true)
+            key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_SYM_ON); expect("か", false)
+            type("a"); expect("かa", false)
+            chooseSetting("Alt+Space")
+            clearEditor()
+            key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_ALT_ON)
+            type("ka"); expect("か", true)
+            key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_ALT_ON); expect("か", false)
+            chooseSetting("Fn+Space（標準）")
+            chooseSetting("Fn+J/K：前/次・Shift併用：縮小/拡大")
+            clearEditor(); toggle()
+            type("nihongowobenkyousuru"); key(KeyEvent.KEYCODE_SPACE)
+            val initial = highlightedRange()
+            vendorFn(KeyEvent.ACTION_DOWN)
+            try {
+                key(KeyEvent.KEYCODE_K)
+                org.junit.Assert.assertTrue(highlightedRange().first > initial.first)
+                key(KeyEvent.KEYCODE_J); assertEquals(initial, highlightedRange())
+                key(KeyEvent.KEYCODE_K, KeyEvent.META_SHIFT_ON)
+                org.junit.Assert.assertNotEquals(initial, highlightedRange())
+                key(KeyEvent.KEYCODE_J, KeyEvent.META_SHIFT_ON)
+                assertEquals(initial, highlightedRange())
+            } finally { vendorFn(KeyEvent.ACTION_UP) }
+            key(KeyEvent.KEYCODE_ENTER); toggle()
+            chooseSetting("Fn+H/L：前/次・Shift併用：縮小/拡大")
+
         } finally {
             context.unregisterReceiver(receiver)
             instrumentation.runOnMainSync { activity.finish() }
