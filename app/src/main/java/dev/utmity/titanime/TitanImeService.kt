@@ -20,6 +20,7 @@ class TitanImeService : InputMethodService() {
     private var engine: MozcEngine? = null
     private var japanese = false
     private var directField = false
+    private var compositionStart = -1
     private var preedit = ""
     private var output = Output.getDefaultInstance()
     private var candidateRow: LinearLayout? = null
@@ -45,6 +46,7 @@ class TitanImeService : InputMethodService() {
     override fun onFinishInput() {
         engine?.close()
         preedit = ""
+        compositionStart = -1
         output = Output.getDefaultInstance()
         titanFnDevices.clear()
         consumedKeys.clear()
@@ -92,6 +94,7 @@ class TitanImeService : InputMethodService() {
         super.onStartInput(attribute, restarting)
         engine?.start()
         preedit = ""
+        compositionStart = -1
         output = Output.getDefaultInstance()
         titanFnDevices.clear()
         consumedKeys.clear()
@@ -104,7 +107,7 @@ class TitanImeService : InputMethodService() {
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
             attribute?.packageName == "dev.utmity.titanime.harness") {
             sendBroadcast(android.content.Intent("dev.utmity.titanime.INPUT_READY")
-                .setPackage("dev.utmity.titanime.harness"))
+                .setPackage("dev.utmity.titanime.harness").putExtra("japanese", japanese))
         }
     }
 
@@ -115,15 +118,45 @@ class TitanImeService : InputMethodService() {
             currentInputEditorInfo?.packageName == "dev.utmity.titanime.harness") {
             android.util.Log.i("TitanImeProbe", "selection=$oldSelStart,$oldSelEnd->$newSelStart,$newSelEnd composing=$candidatesStart,$candidatesEnd length=${preedit.length}")
         }
-        if (preedit.isNotEmpty() && (newSelStart != candidatesEnd || newSelEnd != candidatesEnd || candidatesStart < 0)) {
-            // The editor moved its cursor/selection. Keep the visible text where it
-            // is; committing via commitText here would replace/move the wrong range.
-            currentInputConnection?.finishComposingText()
-            engine?.start()
-            preedit = ""
-            output = Output.getDefaultInstance()
-            refreshStrip()
+        if (preedit.isEmpty()) return
+        val ic = currentInputConnection ?: return
+        if (candidatesStart >= 0 && newSelStart == newSelEnd &&
+            newSelStart in candidatesStart..candidatesEnd) {
+            // Android reports UTF-16 offsets; Mozc uses Unicode character positions.
+            // Ignore obsolete range notifications from an earlier batched update.
+            if (candidatesEnd - candidatesStart != preedit.length) return
+            compositionStart = candidatesStart
+            val offset = newSelStart - candidatesStart
+            val expected = preedit.offsetByCodePoints(0, output.preedit.cursor.coerceIn(0, preedit.codePointCount(0, preedit.length)))
+            if (offset == expected) return
+            if (!output.preedit.hasHighlightedPosition()) {
+                engine?.moveCursor(preedit.codePointCount(0, offset))?.let { applyOutput(ic, it) }
+            } else {
+                // MOVE_CURSOR is composition-only upstream. Preserve conversion and
+                // select the segment touched, rather than resetting the session.
+                val segments = output.preedit.segmentList
+                var end = 0
+                val target = segments.indexOfFirst { end += it.value.length; offset < end }
+                    .let { if (it < 0) segments.lastIndex else it }
+                val focused = segments.indexOfFirst { it.annotation == Preedit.Segment.Annotation.HIGHLIGHT }
+                if (focused >= 0 && target >= 0) {
+                    repeat(kotlin.math.abs(target - focused)) {
+                        moveSegment(if (target < focused) MozcKey.SpecialKey.LEFT else MozcKey.SpecialKey.RIGHT)
+                    }
+                }
+                val caret = preedit.offsetByCodePoints(0, output.preedit.cursor.coerceIn(0, preedit.codePointCount(0, preedit.length)))
+                ic.setSelection(compositionStart + caret, compositionStart + caret)
+            }
+            return
         }
+        // Outside the composing range, or a non-collapsed selection: preserve the
+        // visible text and the editor's selection, then discard only the session state.
+        ic.finishComposingText()
+        engine?.start()
+        preedit = ""
+        compositionStart = -1
+        output = Output.getDefaultInstance()
+        refreshStrip()
     }
 
     private fun moveSegment(key: MozcKey.SpecialKey, shift: Boolean = false) {
@@ -144,6 +177,16 @@ class TitanImeService : InputMethodService() {
             })
             val window = output.candidateWindow
             if (output.preedit.hasHighlightedPosition()) {
+                addView(TextView(this@TitanImeService).apply {
+                    text = "読みに戻す"
+                    setTextColor(android.graphics.Color.BLUE)
+                    setPadding(18, 12, 18, 12)
+                    setOnClickListener {
+                        val ic = currentInputConnection ?: return@setOnClickListener
+                        engine?.key(MozcKey.newBuilder().setSpecialKey(MozcKey.SpecialKey.ESCAPE).build())
+                            ?.let { applyOutput(ic, it) }
+                    }
+                })
                 for ((label, key) in listOf("前文節" to MozcKey.SpecialKey.LEFT, "次文節" to MozcKey.SpecialKey.RIGHT)) {
                     addView(TextView(this@TitanImeService).apply {
                         text = label
@@ -184,7 +227,15 @@ class TitanImeService : InputMethodService() {
     private fun applyOutput(ic: InputConnection, result: Output) {
         ic.beginBatchEdit()
         try {
-            if (result.hasResult()) ic.commitText(result.result.value, 1)
+            if (result.hasResult()) {
+                ic.commitText(result.result.value, 1)
+                compositionStart = -1
+            }
+            if (compositionStart < 0) {
+                ic.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0)?.let {
+                    compositionStart = it.startOffset + minOf(it.selectionStart, it.selectionEnd)
+                }
+            }
             val next = result.preedit.segmentList.joinToString("") { it.value }
             if (next.isNotEmpty()) {
                 val styled = android.text.SpannableString(next)
@@ -197,10 +248,15 @@ class TitanImeService : InputMethodService() {
                     offset += segment.value.length
                 }
                 ic.setComposingText(styled, 1)
+                if (compositionStart >= 0) {
+                    val cursor = next.offsetByCodePoints(0, result.preedit.cursor.coerceIn(0, next.codePointCount(0, next.length)))
+                    ic.setSelection(compositionStart + cursor, compositionStart + cursor)
+                }
             }
             else {
                 if (preedit.isNotEmpty() && !result.hasResult()) ic.setComposingText("", 1)
                 ic.finishComposingText()
+                compositionStart = -1
             }
             preedit = next
             output = result
@@ -255,10 +311,11 @@ class TitanImeService : InputMethodService() {
         if (japanese && !directField && engine != null) {
             // Wait for the actual chord key; a modifier alone has no text to commit.
             if (preedit.isNotEmpty() && (isTitanFn(event) || keyCode == KeyEvent.KEYCODE_SYM ||
-                keyCode == KeyEvent.KEYCODE_FUNCTION || keyCode == KeyEvent.KEYCODE_SHIFT_LEFT ||
+                keyCode == KeyEvent.KEYCODE_FUNCTION || keyCode == KeyEvent.KEYCODE_ALT_LEFT ||
+                keyCode == KeyEvent.KEYCODE_ALT_RIGHT || keyCode == KeyEvent.KEYCODE_SHIFT_LEFT ||
                 keyCode == KeyEvent.KEYCODE_SHIFT_RIGHT)) return true
             val character = event.unicodeChar
-            if (!event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed &&
+            if (!event.isCtrlPressed && !event.isMetaPressed &&
                 character in 33..126 && !character.toChar().isLetterOrDigit()) {
                 // Use the character actually delivered by Android; never invent a
                 // symbol mapping for an Fn/Sym letter whose character is still a letter.
@@ -289,11 +346,11 @@ class TitanImeService : InputMethodService() {
                     event.isShiftPressed)
                 return true
             }
-            if (preedit.isNotEmpty()) {
-                commitComposition(ic)
-                ic.sendKeyEvent(event)
-                ic.sendKeyEvent(KeyEvent.changeAction(event, KeyEvent.ACTION_UP))
-                return true
+            if (preedit.isNotEmpty() && !event.isShiftPressed) {
+                val result = engine!!.key(MozcKey.newBuilder().setSpecialKey(
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) MozcKey.SpecialKey.LEFT else MozcKey.SpecialKey.RIGHT).build())
+                applyOutput(ic, result)
+                return result.consumed
             }
         }
         val special = when (keyCode) {

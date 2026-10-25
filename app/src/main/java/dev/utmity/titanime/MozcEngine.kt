@@ -52,6 +52,10 @@ class MozcEngine(context: Context) {
     fun key(key: KeyEvent): Output = evaluate(Input.newBuilder().setId(session)
         .setType(Input.CommandType.SEND_KEY).setKey(key))
 
+    fun moveCursor(position: Int): Output = evaluate(Input.newBuilder().setId(session)
+        .setType(Input.CommandType.SEND_COMMAND).setCommand(SessionCommand.newBuilder()
+            .setType(SessionCommand.CommandType.MOVE_CURSOR).setCursorPosition(position)))
+
     fun command(type: SessionCommand.CommandType, candidateId: Int? = null): Output {
         val command = SessionCommand.newBuilder().setType(type).setCompositionMode(CompositionMode.HIRAGANA)
         if (candidateId != null) command.id = candidateId

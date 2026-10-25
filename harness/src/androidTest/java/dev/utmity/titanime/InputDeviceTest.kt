@@ -16,9 +16,10 @@ class InputDeviceTest {
         assertEquals("Select Titan IME manually before running this test",
             "dev.utmity.titanime/.TitanImeService",
             Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD))
+        val initialJapanese = java.util.concurrent.atomic.AtomicBoolean()
         val connected = java.util.concurrent.atomic.AtomicInteger()
         val receiver = object : android.content.BroadcastReceiver() {
-            override fun onReceive(c: android.content.Context?, intent: Intent?) { connected.incrementAndGet() }
+            override fun onReceive(c: android.content.Context?, intent: Intent?) { initialJapanese.set(intent?.getBooleanExtra("japanese", false) == true); connected.incrementAndGet() }
         }
         val filter = android.content.IntentFilter("dev.utmity.titanime.INPUT_READY")
         androidx.core.content.ContextCompat.registerReceiver(
@@ -28,11 +29,16 @@ class InputDeviceTest {
         var targetEditor = activity.editor
         try {
             instrumentation.waitForIdleSync()
+            var restarted = false
             var ready = false
             val deadline = android.os.SystemClock.uptimeMillis() + 10000
             while (!ready && android.os.SystemClock.uptimeMillis() < deadline) {
                 instrumentation.runOnMainSync {
                     if (activity.editor.hasWindowFocus()) {
+                        if (!restarted) {
+                            activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java).restartInput(activity.editor)
+                            restarted = true
+                        }
                         activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
                             .showSoftInput(activity.editor, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
                         ready = connected.get() > 0
@@ -76,6 +82,7 @@ class InputDeviceTest {
                 vendorFn(KeyEvent.ACTION_DOWN)
                 try { key(KeyEvent.KEYCODE_SPACE) } finally { vendorFn(KeyEvent.ACTION_UP) }
             }
+            if (initialJapanese.get()) toggle()
             for ((code, symbol) in listOf(KeyEvent.KEYCODE_MINUS to "-", KeyEvent.KEYCODE_COMMA to ",",
                 KeyEvent.KEYCODE_PERIOD to ".", KeyEvent.KEYCODE_LEFT_BRACKET to "[", KeyEvent.KEYCODE_RIGHT_BRACKET to "]",
                 KeyEvent.KEYCODE_APOSTROPHE to "'")) {
@@ -139,10 +146,11 @@ class InputDeviceTest {
                 expect(expected, false)
             }
             // Mozc conversion: physical-key equivalent injection into the real InputConnection.
-            fun clearEditor() {
+            fun clearEditor(prefix: String = "") {
                 val before = connected.get()
                 instrumentation.runOnMainSync {
-                    activity.editor.setText("")
+                    activity.editor.setText(prefix)
+                    activity.editor.setSelection(prefix.length)
                     activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
                         .restartInput(activity.editor)
                 }
@@ -167,6 +175,68 @@ class InputDeviceTest {
             key(KeyEvent.KEYCODE_COMMA, KeyEvent.META_SYM_ON); expect("か、", true)
             key(KeyEvent.KEYCODE_PERIOD, KeyEvent.META_FUNCTION_ON); expect("か、。", true)
             key(KeyEvent.KEYCODE_ENTER); expect("か、。", false)
+            clearEditor()
+            type("ka")
+            key(KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.META_ALT_ON); expect("か", true)
+            // Instrumentation replaces deviceId with virtual keyboard; validate the
+            // device's map separately and inject its resolved punctuation with Alt.
+            val deviceMap = android.view.KeyCharacterMap.load(0)
+            for ((physical, punctuation, expected) in listOf(
+                Triple(KeyEvent.KEYCODE_I, KeyEvent.KEYCODE_MINUS, "かー"),
+                Triple(KeyEvent.KEYCODE_N, KeyEvent.KEYCODE_COMMA, "かー、"),
+                Triple(KeyEvent.KEYCODE_M, KeyEvent.KEYCODE_PERIOD, "かー、。"))) {
+                val symbol = when (punctuation) { KeyEvent.KEYCODE_MINUS -> '-'; KeyEvent.KEYCODE_COMMA -> ','; else -> '.' }
+                assertEquals("Titan's physical Alt map", symbol.code, deviceMap.get(physical, KeyEvent.META_ALT_ON))
+                key(punctuation)
+                expect(expected, true)
+            }
+            key(KeyEvent.KEYCODE_ENTER); expect("かー、。", false)
+            clearEditor()
+            fun tapEditorOffset(offset: Int) {
+                val location = IntArray(2)
+                var x = 0f; var y = 0f
+                instrumentation.runOnMainSync {
+                    targetEditor.getLocationOnScreen(location)
+                    val layout = targetEditor.layout
+                    val line = layout.getLineForOffset(offset)
+                    x = location[0] + targetEditor.totalPaddingLeft - targetEditor.scrollX + layout.getPrimaryHorizontal(offset)
+                    y = (location[1] + targetEditor.totalPaddingTop - targetEditor.scrollY +
+                        (layout.getLineTop(line) + layout.getLineBottom(line)) / 2).toFloat()
+                }
+                requireTestFocus()
+                val time = android.os.SystemClock.uptimeMillis()
+                for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                    val event = android.view.MotionEvent.obtain(time, android.os.SystemClock.uptimeMillis(), action, x, y, 0)
+                    event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                    org.junit.Assert.assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true))
+                    event.recycle()
+                }
+                instrumentation.waitForIdleSync(); Thread.sleep(200)
+            }
+            type("nihongo"); expect("にほんご", true)
+            tapEditorOffset(3)
+            instrumentation.waitForIdleSync(); Thread.sleep(150)
+            expect("にほんご", true)
+            type("ka"); expect("にほんかご", true)
+            key(KeyEvent.KEYCODE_DEL); expect("にほんご", true)
+            key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("日本語", false)
+            clearEditor()
+            clearEditor("😀")
+            type("nihongo"); tapEditorOffset(5)
+            expect("😀にほんご", true)
+            type("ka"); expect("😀にほんかご", true)
+            key(KeyEvent.KEYCODE_DEL); expect("😀にほんご", true)
+            key(KeyEvent.KEYCODE_SPACE); expect("😀日本語", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("😀日本語", false)
+            clearEditor()
+            type("a"); key(KeyEvent.KEYCODE_ENTER)
+            type("nihongo")
+            instrumentation.runOnMainSync { activity.editor.setSelection(0) }
+            instrumentation.waitForIdleSync(); Thread.sleep(150)
+            expect("あにほんご", false)
+            type("ka"); expect("かあにほんご", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("かあにほんご", false)
             clearEditor()
             type("nihongo"); expect("にほんご", true)
             key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
@@ -227,6 +297,8 @@ class InputDeviceTest {
             key(KeyEvent.KEYCODE_ENTER); expect("日本語", false)
             clearEditor()
             type("nihongo"); key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
+            tapImeText("読みに戻す"); expect("にほんご", true)
+            key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
             key(KeyEvent.KEYCODE_ESCAPE); expect("にほんご", true)
             key(KeyEvent.KEYCODE_ENTER); expect("にほんご", false)
             // Former custom-composer regressions now exercise Mozc itself on Android.
@@ -256,16 +328,16 @@ class InputDeviceTest {
                 key(KeyEvent.KEYCODE_ENTER); expect(replacement, false)
                 clearEditor()
             }
-            // Before conversion, arrows commit the reading and move the editor caret.
+            // Before conversion, arrows move the Mozc cursor without committing.
             type("kana")
-            key(KeyEvent.KEYCODE_DPAD_LEFT); expect("かな", false)
+            key(KeyEvent.KEYCODE_DPAD_LEFT); expect("かな", true)
             type("ki"); expect("かきな", true)
             key(KeyEvent.KEYCODE_ENTER); expect("かきな", false)
             clearEditor()
-            type("n")
-            key(KeyEvent.KEYCODE_DPAD_LEFT); expect("ん", false)
-            type("ka"); expect("かん", true)
-            key(KeyEvent.KEYCODE_ENTER); expect("かん", false)
+            type("ka")
+            key(KeyEvent.KEYCODE_DPAD_LEFT); expect("か", true)
+            type("ki"); expect("きか", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("きか", false)
             clearEditor()
             type("nihongowobenkyousuru")
             key(KeyEvent.KEYCODE_SPACE)
@@ -295,6 +367,9 @@ class InputDeviceTest {
 
             key(KeyEvent.KEYCODE_DPAD_RIGHT)
             val secondSegment = highlightedRange()
+            key(KeyEvent.KEYCODE_DPAD_LEFT)
+            tapEditorOffset(secondSegment.first)
+            assertEquals("Tapping conversion selects a segment without discarding it", secondSegment, highlightedRange())
             org.junit.Assert.assertTrue("Right must focus a later segment", secondSegment.first > firstSegment.first)
             key(KeyEvent.KEYCODE_DPAD_LEFT)
             assertEquals(firstSegment, highlightedRange())
