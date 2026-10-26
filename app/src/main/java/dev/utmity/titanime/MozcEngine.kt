@@ -60,7 +60,10 @@ class MozcEngine(private val context: Context) {
             .setUseHistorySuggest(preferences.prediction).setUseDictionarySuggest(preferences.prediction)
             .setUseRealtimeConversion(preferences.prediction).setSuggestionsSize(8)
             .setUseSpellingCorrection(preferences.correction).setUseTypingCorrection(preferences.correction)
+            .setUseKanaModifierInsensitiveConversion(preferences.correction)
         evaluate(Input.newBuilder().setType(Input.CommandType.SET_CONFIG).setConfig(config))
+        evaluate(Input.newBuilder().setType(Input.CommandType.SET_REQUEST).setRequest(
+            Request.newBuilder().setKanaModifierInsensitiveConversion(true)))
     }
 
     fun start() {
