@@ -32,7 +32,8 @@ class DictionaryUiTest {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
             }))
         }
-        val activity = instrumentation.startActivitySync(Intent(context, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        instrumentation.startActivitySync(Intent(context, SettingsActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         try {
             click("ユーザー辞書"); click("単語を登録")
             fill("単語", token); fill("読み（ひらがな）", "テスト")
@@ -72,7 +73,9 @@ class DictionaryUiTest {
         } finally {
             store.list().filter { it.entry.value.startsWith(token) }.sortedByDescending { it.index }.forEach(store::delete)
             MozcEngine(context).reloadDictionary()
-            instrumentation.runOnMainSync { activity.finish() }
+            val cleanup = instrumentation.startActivitySync(Intent(context, SettingsActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+            instrumentation.runOnMainSync { cleanup.finish() }
         }
     }
 }

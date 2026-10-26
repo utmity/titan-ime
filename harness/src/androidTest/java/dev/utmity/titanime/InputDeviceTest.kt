@@ -84,7 +84,7 @@ class InputDeviceTest {
             }
             fun chooseSetting(label: String) {
                 context.startActivity(Intent().setClassName("dev.utmity.titanime", "dev.utmity.titanime.SettingsActivity")
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
                 val deadline = android.os.SystemClock.uptimeMillis() + 10000
                 var selected = false
                 while (!selected && android.os.SystemClock.uptimeMillis() < deadline) {
@@ -530,8 +530,19 @@ class InputDeviceTest {
             clearEditor(); type("suisei"); key(KeyEvent.KEYCODE_SPACE)
             expect(learned, true)
             key(KeyEvent.KEYCODE_ENTER); toggle()
-
-
+            // Prediction/correction must not enter a password editor even in Japanese mode.
+            clearEditor(); toggle()
+            instrumentation.runOnMainSync {
+                activity.secondEditor.setText("")
+                activity.secondEditor.inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+            focus(activity.secondEditor)
+            type("fuinki"); expect("fuinki", false)
+            key(KeyEvent.KEYCODE_MINUS); expect("fuinki-", false)
+            focus(activity.editor)
+            type("ka"); expect("か", true)
+            key(KeyEvent.KEYCODE_ENTER); toggle()
         } finally {
             context.unregisterReceiver(receiver)
             instrumentation.runOnMainSync { activity.finish() }
