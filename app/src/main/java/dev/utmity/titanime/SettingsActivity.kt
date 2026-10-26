@@ -44,10 +44,12 @@ class SettingsActivity : Activity() {
             content.addView(group)
         }
         choices("日英切り替え（保存後すぐ反映）", listOf("fn" to "Fn+Space（標準）", "sym" to "Sym+Space", "alt" to "Alt+Space"), preferences.toggle) { preferences.toggle = it }
+        choices("T2E内蔵キーボードのAlt", listOf("text" to "Altで数字・記号（標準）", "meta" to "Altをアプリへ渡す（Meta）"), if (preferences.altText) "text" else "meta") { preferences.altText = it == "text" }
         choices("文節操作（変換中のみ）", listOf("hl" to "Fn+H/L：前/次・Fn+U/O：縮小/拡大", "jk" to "Fn+J/K：前/次・Fn+U/O：縮小/拡大"), preferences.segments) { preferences.segments = it }
         choices("端末内の変換学習", listOf("on" to "変換学習オン", "off" to "変換学習オフ"), if (preferences.learning) "on" else "off") { preferences.learning = it == "on" }
         choices("入力中の予測候補", listOf("on" to "予測変換オン", "off" to "予測変換オフ"), if (preferences.prediction) "on" else "off") { preferences.prediction = it == "on" }
         choices("Mozc標準の訂正候補（自動置換なし）", listOf("on" to "訂正候補オン", "off" to "訂正候補オフ"), if (preferences.correction) "on" else "off") { preferences.correction = it == "on" }
+        text("訂正オンでは濁点・半濁点・小書きかなの違いも候補検索に含めます。例：かつこう→学校。元の読みは「そのまま」で確定できます。一般的な脱字や隣接キーの打ち間違いには未対応です。")
         text("Space：変換・次候補\nEnter：確定（再度で改行）\nBackspace：削除\n記号 - , . → ー 、 。\n文節長変更はFn+U（縮小）/Fn+O（拡大）。\nCtrl+Shift+Jは廃止しました。\n端末独自のショートカットが優先される場合は別の切替を選んでください。\nパスワード・数字欄は直接入力です。\n学習は端末内のみ。オフでも保存済み履歴は消しません。")
         setContentView(ScrollView(this).apply { addView(content) })
     }

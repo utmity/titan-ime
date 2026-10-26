@@ -314,6 +314,19 @@ class TitanImeService : InputMethodService() {
         engine?.command(SessionCommand.CommandType.SUBMIT)?.let { applyOutput(ic, it) }
     }
 
+    private fun finishForAppKey(ic: InputConnection) {
+        if (selectedReading == null) { commitComposition(ic); return }
+        // Copy/cut must retain the editor selection rather than collapse it when
+        // committing Mozc's result. Preserve the selected visible reading in place.
+        ic.finishComposingText()
+        engine?.start()
+        preedit = ""
+        compositionStart = -1
+        selectedReading = null
+        output = Output.getDefaultInstance()
+        refreshStrip()
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val consumed = handleKey(keyCode, event)
         if (consumed) consumedKeys.add(event.deviceId to keyCode)
@@ -336,11 +349,21 @@ class TitanImeService : InputMethodService() {
             }
             return true
         }
+        // Modifiers alone have no text to commit. Pass their real Down and Up to
+        // the app; never synthesize an early Up while the physical key is held.
+        if (KeyEvent.isModifierKey(keyCode) || isTitanFn(event) || keyCode == KeyEvent.KEYCODE_SYM ||
+            keyCode == KeyEvent.KEYCODE_FUNCTION) return super.onKeyDown(keyCode, event)
+        val fnHeld = event.isFunctionPressed || event.deviceId in titanFnDevices
+        val altText = PhysicalKeyboardPolicy.altText(event, fnHeld, preferences.altText)
+        if (event.isCtrlPressed || event.isMetaPressed || (event.isAltPressed && altText == null)) {
+            if (japanese && !directField) finishForAppKey(ic)
+            return super.onKeyDown(keyCode, event)
+        }
         if (japanese && !directField && engine != null && selectedReading != null) {
             val character = event.unicodeChar
             val modified = event.isAltPressed || event.isSymPressed || event.isFunctionPressed || event.deviceId in titanFnDevices
             val replacement = !event.isCtrlPressed && !event.isMetaPressed && character in 33..126 &&
-                (!modified || !character.toChar().isLetterOrDigit())
+                (!modified || altText != null || !character.toChar().isLetterOrDigit())
             if (keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_FORWARD_DEL || replacement) {
                 deleteSelectedReading(ic)
                 if (keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_FORWARD_DEL) return true
@@ -353,9 +376,6 @@ class TitanImeService : InputMethodService() {
             }
         }
         if (japanese && !directField && output.preedit.hasHighlightedPosition()) {
-            // Modifier down must not commit conversion before its chord arrives.
-            if (isTitanFn(event) || keyCode == KeyEvent.KEYCODE_FUNCTION ||
-                keyCode == KeyEvent.KEYCODE_SHIFT_LEFT || keyCode == KeyEvent.KEYCODE_SHIFT_RIGHT) return true
             val action = preferences.segmentBindings().resolve(event, event.isFunctionPressed || event.deviceId in titanFnDevices)
             if (action != null) {
                 moveSegment(if (action == SegmentAction.PREVIOUS || action == SegmentAction.SHRINK)
@@ -364,12 +384,16 @@ class TitanImeService : InputMethodService() {
                 return true
             }
         }
+        if (altText != null) {
+            if (japanese && !directField && engine != null && !altText.toChar().isDigit()) {
+                applyOutput(ic, engine!!.key(MozcKey.newBuilder().setKeyCode(altText).build()))
+            } else {
+                if (japanese && !directField) commitComposition(ic)
+                ic.commitText(altText.toChar().toString(), 1)
+            }
+            return true
+        }
         if (japanese && !directField && engine != null) {
-            // Wait for the actual chord key; a modifier alone has no text to commit.
-            if (preedit.isNotEmpty() && (isTitanFn(event) || keyCode == KeyEvent.KEYCODE_SYM ||
-                keyCode == KeyEvent.KEYCODE_FUNCTION || keyCode == KeyEvent.KEYCODE_ALT_LEFT ||
-                keyCode == KeyEvent.KEYCODE_ALT_RIGHT || keyCode == KeyEvent.KEYCODE_SHIFT_LEFT ||
-                keyCode == KeyEvent.KEYCODE_SHIFT_RIGHT)) return true
             val character = event.unicodeChar
             if (!event.isCtrlPressed && !event.isMetaPressed &&
                 character in 33..126 && !character.toChar().isLetterOrDigit()) {
@@ -381,21 +405,10 @@ class TitanImeService : InputMethodService() {
             }
         }
         if (event.isSymPressed || event.isFunctionPressed || event.deviceId in titanFnDevices) {
-            if (japanese && preedit.isNotEmpty()) {
-                commitComposition(ic)
-                ic.sendKeyEvent(event)
-                ic.sendKeyEvent(KeyEvent.changeAction(event, KeyEvent.ACTION_UP))
-                return true
-            }
+            if (japanese && preedit.isNotEmpty()) finishForAppKey(ic)
             return super.onKeyDown(keyCode, event)
         }
         if (!japanese || directField || engine == null) return super.onKeyDown(keyCode, event)
-        if (event.isAltPressed || event.isCtrlPressed || event.isMetaPressed) {
-            commitComposition(ic)
-            ic.sendKeyEvent(event)
-            ic.sendKeyEvent(KeyEvent.changeAction(event, KeyEvent.ACTION_UP))
-            return true
-        }
         if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
             if (output.preedit.hasHighlightedPosition()) {
                 moveSegment(if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) MozcKey.SpecialKey.LEFT else MozcKey.SpecialKey.RIGHT,
@@ -441,9 +454,7 @@ class TitanImeService : InputMethodService() {
             }
             if (preedit.isNotEmpty()) {
                 commitComposition(ic)
-                ic.sendKeyEvent(event)
-                ic.sendKeyEvent(KeyEvent.changeAction(event, KeyEvent.ACTION_UP))
-                return true
+                return super.onKeyDown(keyCode, event)
             }
         }
         return super.onKeyDown(keyCode, event)

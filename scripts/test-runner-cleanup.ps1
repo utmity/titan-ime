@@ -16,6 +16,7 @@ function global:adb.exe {
         }
         '^shell ime list' { return 'dev.utmity.titanime/.TitanImeService' }
         '^shell getevent' { return 'mock capabilities' }
+        '^shell am start -W -n dev\.utmity\.titanime\.harness/dev\.utmity\.titanime\.InputTestActivity$' { return 'Status: ok' }
         '^shell am instrument' {
             if ($global:titanRunnerMock.failTest) { return 'FAILURES!!!' }
             return 'OK (1 test)'

@@ -48,6 +48,9 @@ try {
         if (((Adb shell settings get secure default_input_method) -join '').Trim() -ne $titan) {
             throw 'Titan IME is no longer selected. Reselect manually or use -SelectTitanIme.'
         }
+        # Bring the isolated task forward explicitly. Instrumentation launched
+        # behind Settings can otherwise time out waiting for an input connection.
+        Adb shell am start -W -n dev.utmity.titanime.harness/dev.utmity.titanime.InputTestActivity
         RunTest 'dev.utmity.titanime.harness.test' 'input-sequence'
     }
 } finally {

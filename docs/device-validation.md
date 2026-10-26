@@ -271,3 +271,15 @@ Issues found and fixed during this work:
 Remaining limits: arbitrary adjacent-key mistakes, missing/extra-key correction, custom physical-layout correction, unsupported POS types, paste and other-editor compatibility. The JNI bridge uses canonical dictionary storage plus RELOAD_AND_WAIT because the old dictionary-edit command IDs are reserved in this pinned revision; it does not pretend those removed APIs still exist. See prediction-dictionary.md and README for operations and scope.
 
 Final harness follow-up: prediction/correction-on password input remained literal fuinki- without composition; returning to the normal field restored か. A leftover DocumentsUI activity initially blocked the settings locator. UI tests now clear only their Titan settings task before opening it and close that task after dictionary tests; reruns passed. Physical trial setup stores the desired mode, but a live IME service also needs a restart to reload it; do not infer its starting mode from preferences alone.
+
+## 2026-10-26: modifier routing and kana correction
+
+- Debug APKs, both instrumentation APKs and Android lint: PASS (48 seconds).
+- Release assembly: PASS. Offline runner cleanup tests: PASS, including simulated test/log failure.
+- Titan native instrumentation: PhysicalKeyboardPolicyTest, KanaCorrectionTest, MozcFeaturesTest, 3 tests PASS (0.662 seconds). Policy tests construct events against the actual TitanKey KCM; they are not physical key presses.
+- Full injected input suite: PASS (94.461 seconds), including held Ctrl/R Down/Up pairing, unchanged composition on modifier-only Down, existing punctuation/segments/editing/password checks, prediction taps for 学校 and 病院, and literal preservation. Two initial attempts timed out before input because the harness was not foreground; explicitly opening the harness resolved it. The runner now opens that isolated task before instrumentation. Failed attempts are not counted as successes.
+- Physical baseline: the user's right Shift mapping delivered key 113/scan 54/meta 12288. The previous IME generated premature Up events for held Ctrl. The accidental Fn trial is excluded from Ctrl results.
+- Termux 0.118.3: source confirms left-Alt is stripped from Unicode lookup and forwarded as Meta. New-session creation and drawer navigation via injected Ctrl+Alt shortcuts worked. Updated physical Alt+R/Ctrl+C checks are pending user feedback; no success claim yet. ChatGPT-specific clipboard behavior and terminal Meta-mode physical checks remain unverified.
+- Mozc standard kana-modifier-insensitive search is enabled by the correction preference in both Config and Request. katukou -> 学校 and hiyouin -> 病院 appear as prediction candidates; han -> パン appears in Space conversion. Exact-reading user dictionary priority remains first with correction on/off. No automatic replacement or new native/JNI build is involved. A 40-key snapshot measured correction-off p50/p95 1168/2355 microseconds and correction-on 1144/2379 microseconds; this is not a general latency benchmark.
+
+Details and remaining terminal limitations: [modifier compatibility](modifier-compatibility.md).

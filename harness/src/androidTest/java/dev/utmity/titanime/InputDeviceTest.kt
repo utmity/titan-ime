@@ -179,6 +179,31 @@ class InputDeviceTest {
                 instrumentation.waitForIdleSync()
             }
             fun type(text: String) { text.forEach { key(KeyEvent.KEYCODE_A + (it - 'a')) } }
+            // A held physical modifier/chord must not receive a synthetic early Up.
+            clearEditor(); type("ka"); expect("か", true)
+            instrumentation.runOnMainSync { activity.receivedKeys.clear() }
+            val ctrl = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
+            instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_CTRL_LEFT, 0, ctrl))
+            instrumentation.waitForIdleSync(); Thread.sleep(100)
+            expect("か", true)
+            instrumentation.runOnMainSync {
+                assertEquals(0, activity.receivedKeys.count { it.keyCode == KeyEvent.KEYCODE_CTRL_LEFT && it.action == KeyEvent.ACTION_UP })
+            }
+            instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_R, 0, ctrl))
+            instrumentation.waitForIdleSync(); Thread.sleep(100)
+            expect("か", false)
+            instrumentation.runOnMainSync {
+                assertEquals(0, activity.receivedKeys.count { it.keyCode == KeyEvent.KEYCODE_R && it.action == KeyEvent.ACTION_UP })
+            }
+            instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_R, 0, ctrl))
+            instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_CTRL_LEFT, 0, 0))
+            instrumentation.waitForIdleSync(); Thread.sleep(100)
+            instrumentation.runOnMainSync {
+                for (code in listOf(KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_R)) {
+                    assertEquals(1, activity.receivedKeys.count { it.keyCode == code && it.action == KeyEvent.ACTION_DOWN })
+                    assertEquals(1, activity.receivedKeys.count { it.keyCode == code && it.action == KeyEvent.ACTION_UP })
+                }
+            }
             clearEditor()
             // A modifier press alone must not commit before its punctuation arrives.
             type("ka")
@@ -326,6 +351,14 @@ class InputDeviceTest {
             tapImeText("雰囲気（訂正）"); expect("雰囲気", false)
             clearEditor(); type("fuinki"); expect("ふいんき", true)
             tapImeText("そのまま：ふいんき"); expect("ふいんき", false)
+            clearEditor(); type("katukou"); expect("かつこう", true)
+            tapImeText("学校"); expect("学校", false)
+            type("ka"); expect("学校か", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("学校か", false)
+            clearEditor(); type("hiyouin"); expect("ひよういn", true)
+            tapImeText("病院"); expect("病院", false)
+            clearEditor(); type("katukou"); expect("かつこう", true)
+            tapImeText("そのまま：かつこう"); expect("かつこう", false)
             chooseSetting("予測変換オフ")
             clearEditor(); type("nihongo"); expect("にほんご", true)
             key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)

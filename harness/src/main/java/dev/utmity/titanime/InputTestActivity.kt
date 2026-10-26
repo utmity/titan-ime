@@ -13,6 +13,7 @@ class InputTestActivity : Activity() {
     lateinit var editor: EditText
     lateinit var secondEditor: EditText
     private lateinit var events: TextView
+    val receivedKeys = mutableListOf<KeyEvent>()
     override fun onCreate(state: Bundle?) {
         setTheme(android.R.style.Theme_Material_Light_NoActionBar)
         super.onCreate(state)
@@ -44,6 +45,7 @@ class InputTestActivity : Activity() {
         editor.requestFocus()
     }
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        receivedKeys.add(KeyEvent(event))
         val line = "action=${event.action} key=${event.keyCode} scan=${event.scanCode} meta=${event.metaState} device=${event.deviceId} repeat=${event.repeatCount}"
         events.text = (events.text.toString() + "\n" + line).takeLast(4000)
         android.util.Log.i("TitanKeyProbe", line)

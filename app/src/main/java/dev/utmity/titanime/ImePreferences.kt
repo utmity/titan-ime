@@ -5,6 +5,9 @@ import android.view.KeyEvent
 
 internal class ImePreferences(context: Context) {
     val store = context.getSharedPreferences("ime_settings", Context.MODE_PRIVATE)
+    var altText: Boolean
+        get() = store.getBoolean("alt_text", true)
+        set(value) { store.edit().putBoolean("alt_text", value).apply() }
     var prediction: Boolean
         get() = store.getBoolean("prediction", true)
         set(value) { store.edit().putBoolean("prediction", value).apply() }
