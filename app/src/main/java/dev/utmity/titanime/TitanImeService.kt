@@ -20,6 +20,7 @@ class TitanImeService : InputMethodService() {
     private var engine: MozcEngine? = null
     private var japanese = false
     private var directField = false
+    private var selectedReading: Pair<Int, Int>? = null
     private var compositionStart = -1
     private var preedit = ""
     private var output = Output.getDefaultInstance()
@@ -48,6 +49,7 @@ class TitanImeService : InputMethodService() {
         engine?.sync()
         preedit = ""
         compositionStart = -1
+        selectedReading = null
         output = Output.getDefaultInstance()
         titanFnDevices.clear()
         consumedKeys.clear()
@@ -97,6 +99,7 @@ class TitanImeService : InputMethodService() {
         engine?.start()
         preedit = ""
         compositionStart = -1
+        selectedReading = null
         output = Output.getDefaultInstance()
         titanFnDevices.clear()
         consumedKeys.clear()
@@ -122,6 +125,15 @@ class TitanImeService : InputMethodService() {
         }
         if (preedit.isEmpty()) return
         val ic = currentInputConnection ?: return
+        if (candidatesStart >= 0 && candidatesEnd - candidatesStart == preedit.length &&
+            newSelStart != newSelEnd && newSelStart in candidatesStart..candidatesEnd &&
+            newSelEnd in candidatesStart..candidatesEnd && !output.preedit.hasHighlightedPosition()) {
+            compositionStart = candidatesStart
+            selectedReading = minOf(newSelStart, newSelEnd) - candidatesStart to
+                maxOf(newSelStart, newSelEnd) - candidatesStart
+            return
+        }
+        selectedReading = null
         if (candidatesStart >= 0 && newSelStart == newSelEnd &&
             newSelStart in candidatesStart..candidatesEnd) {
             // Android reports UTF-16 offsets; Mozc uses Unicode character positions.
@@ -151,12 +163,13 @@ class TitanImeService : InputMethodService() {
             }
             return
         }
-        // Outside the composing range, or a non-collapsed selection: preserve the
+        // Outside the composing range, or selection during conversion: preserve the
         // visible text and the editor's selection, then discard only the session state.
         ic.finishComposingText()
         engine?.start()
         preedit = ""
         compositionStart = -1
+        selectedReading = null
         output = Output.getDefaultInstance()
         refreshStrip()
     }
@@ -173,11 +186,19 @@ class TitanImeService : InputMethodService() {
         candidateRow?.apply {
             removeAllViews()
             addView(TextView(this@TitanImeService).apply {
-                text = if (engine == null) "Mozc unavailable" else "あ  "
+                text = if (engine == null) "Mozc unavailable" else if (output.preedit.hasHighlightedPosition()) "変換" else "予測"
                 setTextColor(android.graphics.Color.DKGRAY)
                 setPadding(12, 12, 12, 12)
             })
             val window = output.candidateWindow
+            if (preedit.isNotEmpty() && !output.preedit.hasHighlightedPosition()) {
+                addView(TextView(this@TitanImeService).apply {
+                    text = "そのまま：$preedit"
+                    setTextColor(android.graphics.Color.DKGRAY)
+                    setPadding(18, 12, 18, 12)
+                    setOnClickListener { currentInputConnection?.let { commitComposition(it) } }
+                })
+            }
             if (output.preedit.hasHighlightedPosition()) {
                 addView(TextView(this@TitanImeService).apply {
                     text = "読みに戻す"
@@ -206,13 +227,18 @@ class TitanImeService : InputMethodService() {
             })
             for (candidate in window.candidateList) {
                 addView(TextView(this@TitanImeService).apply {
-                    text = (if (window.hasFocusedIndex() && window.focusedIndex == candidate.index) "● " else "") + candidate.value
+                    val attributes = output.allCandidateWords.candidatesList.firstOrNull { it.id == candidate.id }?.attributesList.orEmpty()
+                    val correction = attributes.any { it.name == "SPELLING_CORRECTION" || it.name == "TYPING_CORRECTION" }
+                    text = (if (window.hasFocusedIndex() && window.focusedIndex == candidate.index) "● " else "") + candidate.value +
+                        (if (correction) "（訂正）" else "")
+                    contentDescription = candidate.value + if (correction) " 訂正候補 ${candidate.annotation.description}" else " 候補"
                     textSize = 18f
                     setTextColor(android.graphics.Color.BLACK)
                     setPadding(18, 12, 18, 12)
                     setOnClickListener {
                         val ic = currentInputConnection ?: return@setOnClickListener
-                        val result = engine?.command(SessionCommand.CommandType.HIGHLIGHT_CANDIDATE, candidate.id)
+                        val result = engine?.command(if (output.preedit.hasHighlightedPosition())
+                            SessionCommand.CommandType.HIGHLIGHT_CANDIDATE else SessionCommand.CommandType.SUBMIT_CANDIDATE, candidate.id)
                             ?: return@setOnClickListener
                         applyOutput(ic, result)
                     }
@@ -226,7 +252,19 @@ class TitanImeService : InputMethodService() {
         }
     }
 
+    private fun deleteSelectedReading(ic: InputConnection) {
+        val (start, end) = selectedReading ?: return
+        selectedReading = null
+        val mozc = engine ?: return
+        var result = mozc.moveCursor(preedit.codePointCount(0, end))
+        repeat(preedit.codePointCount(start, end)) {
+            result = mozc.key(MozcKey.newBuilder().setSpecialKey(MozcKey.SpecialKey.BACKSPACE).build())
+        }
+        applyOutput(ic, result)
+    }
+
     private fun applyOutput(ic: InputConnection, result: Output) {
+        selectedReading = null
         ic.beginBatchEdit()
         try {
             if (result.hasResult()) {
@@ -298,6 +336,22 @@ class TitanImeService : InputMethodService() {
             }
             return true
         }
+        if (japanese && !directField && engine != null && selectedReading != null) {
+            val character = event.unicodeChar
+            val modified = event.isAltPressed || event.isSymPressed || event.isFunctionPressed || event.deviceId in titanFnDevices
+            val replacement = !event.isCtrlPressed && !event.isMetaPressed && character in 33..126 &&
+                (!modified || !character.toChar().isLetterOrDigit())
+            if (keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_FORWARD_DEL || replacement) {
+                deleteSelectedReading(ic)
+                if (keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_FORWARD_DEL) return true
+            } else if (!event.isShiftPressed && (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)) {
+                val range = selectedReading!!
+                val offset = if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) range.first else range.second
+                selectedReading = null
+                engine?.moveCursor(preedit.codePointCount(0, offset))?.let { applyOutput(ic, it) }
+                return true
+            }
+        }
         if (japanese && !directField && output.preedit.hasHighlightedPosition()) {
             // Modifier down must not commit conversion before its chord arrives.
             if (isTitanFn(event) || keyCode == KeyEvent.KEYCODE_FUNCTION ||
@@ -357,6 +411,7 @@ class TitanImeService : InputMethodService() {
         }
         val special = when (keyCode) {
             KeyEvent.KEYCODE_DEL -> MozcKey.SpecialKey.BACKSPACE
+            KeyEvent.KEYCODE_FORWARD_DEL -> MozcKey.SpecialKey.DEL
             KeyEvent.KEYCODE_SPACE -> MozcKey.SpecialKey.SPACE
             KeyEvent.KEYCODE_ENTER -> MozcKey.SpecialKey.ENTER
             KeyEvent.KEYCODE_ESCAPE -> MozcKey.SpecialKey.ESCAPE

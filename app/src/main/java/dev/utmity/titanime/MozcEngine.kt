@@ -7,7 +7,7 @@ import org.mozc.android.inputmethod.japanese.protobuf.ProtoConfig.Config
 import java.io.File
 
 /** One main-thread session. Mozc owns romaji, preedit, segmentation and candidates. */
-class MozcEngine(context: Context) {
+class MozcEngine(private val context: Context) {
     private var session = 0L
     private var learningEnabled = ImePreferences(context).learning
     init {
@@ -18,12 +18,14 @@ class MozcEngine(context: Context) {
             check(temp.renameTo(data)) { "Cannot install Mozc dictionary" }
         }
         val profile = File(context.noBackupFilesDir, "mozc").apply { mkdirs() }
-        check(MozcJni.onPostLoad(profile.path, data.path))
-        check(MozcJni.getDataVersion().isNotBlank()) { "Mozc dictionary did not load" }
+        synchronized(MozcEngine::class.java) {
+            check(MozcJni.onPostLoad(profile.path, data.path))
+            check(MozcJni.getDataVersion().isNotBlank()) { "Mozc dictionary did not load" }
+        }
         // Sensitive fields bypass the engine; ordinary conversion may learn locally.
         val config = evaluate(Input.newBuilder().setType(Input.CommandType.GET_CONFIG)).config.toBuilder()
-            .setSessionKeymap(Config.SessionKeymap.MSIME).setIncognitoMode(!learningEnabled)
-            .setHistoryLearningLevel(Config.HistoryLearningLevel.DEFAULT_HISTORY)
+            .setSessionKeymap(Config.SessionKeymap.MSIME).setIncognitoMode(false)
+            .setHistoryLearningLevel(if (learningEnabled) Config.HistoryLearningLevel.DEFAULT_HISTORY else Config.HistoryLearningLevel.NO_HISTORY)
             .setAutoSwitchCompositionMode(false)
         config.customRomanTable = context.assets.open("romanji-hiragana.tsv").use {
             com.google.protobuf.ByteString.readFrom(it)
@@ -36,21 +38,34 @@ class MozcEngine(context: Context) {
         evaluate(Input.newBuilder().setType(Input.CommandType.SET_CONFIG).setConfig(config))
     }
 
-    private fun evaluate(input: Input.Builder): Output = Command.parseFrom(
-        MozcJni.evalCommand(Command.newBuilder().setInput(input).build().toByteArray())).output
+    private fun evaluate(input: Input.Builder): Output = synchronized(MozcEngine::class.java) {
+        Command.parseFrom(MozcJni.evalCommand(Command.newBuilder().setInput(input).build().toByteArray())).output
+    }
 
     fun setLearning(enabled: Boolean) {
         if (enabled == learningEnabled) return
         val config = evaluate(Input.newBuilder().setType(Input.CommandType.GET_CONFIG)).config.toBuilder()
-            .setIncognitoMode(!enabled).setHistoryLearningLevel(Config.HistoryLearningLevel.DEFAULT_HISTORY)
+            .setIncognitoMode(false).setHistoryLearningLevel(if (enabled) Config.HistoryLearningLevel.DEFAULT_HISTORY else Config.HistoryLearningLevel.NO_HISTORY)
         evaluate(Input.newBuilder().setType(Input.CommandType.SET_CONFIG).setConfig(config))
         learningEnabled = enabled
     }
 
     fun sync() { evaluate(Input.newBuilder().setType(Input.CommandType.SYNC_DATA)) }
 
+    fun reloadDictionary() { evaluate(Input.newBuilder().setType(Input.CommandType.RELOAD_AND_WAIT)) }
+
+    fun configureSuggestions() {
+        val preferences = ImePreferences(context)
+        val config = evaluate(Input.newBuilder().setType(Input.CommandType.GET_CONFIG)).config.toBuilder()
+            .setUseHistorySuggest(preferences.prediction).setUseDictionarySuggest(preferences.prediction)
+            .setUseRealtimeConversion(preferences.prediction).setSuggestionsSize(8)
+            .setUseSpellingCorrection(preferences.correction).setUseTypingCorrection(preferences.correction)
+        evaluate(Input.newBuilder().setType(Input.CommandType.SET_CONFIG).setConfig(config))
+    }
+
     fun start() {
         close()
+        configureSuggestions()
         session = evaluate(Input.newBuilder().setType(Input.CommandType.CREATE_SESSION)).id
         check(session != 0L) { "Mozc session creation failed" }
         command(SessionCommand.CommandType.TURN_ON_IME)

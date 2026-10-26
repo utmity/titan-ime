@@ -48,6 +48,7 @@ jobs:
           bash gradlew --no-daemon --console=plain
           :app:lintDebug :harness:lintDebug
           :app:assembleDebug :app:assembleRelease
+          :app:assembleDebugAndroidTest
           :harness:assembleDebug :harness:assembleDebugAndroidTest
       - name: Save verification reports
         if: always()
@@ -65,6 +66,7 @@ jobs:
           name: debug-device-test-apks
           path: |
             app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/androidTest/debug/*.apk
             harness/build/outputs/apk/debug/*.apk
             harness/build/outputs/apk/androidTest/debug/*.apk
           if-no-files-found: error

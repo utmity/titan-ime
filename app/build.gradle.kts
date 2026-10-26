@@ -12,6 +12,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
     }
     compileOptions {
@@ -26,6 +27,8 @@ kotlin {
 dependencies {
     implementation("com.google.protobuf:protobuf-javalite:4.34.1")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("junit:junit:4.13.2")
 }
 protobuf {
     protoc { artifact = "com.google.protobuf:protoc:4.34.1" }

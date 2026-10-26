@@ -5,6 +5,12 @@ import android.view.KeyEvent
 
 internal class ImePreferences(context: Context) {
     val store = context.getSharedPreferences("ime_settings", Context.MODE_PRIVATE)
+    var prediction: Boolean
+        get() = store.getBoolean("prediction", true)
+        set(value) { store.edit().putBoolean("prediction", value).apply() }
+    var correction: Boolean
+        get() = store.getBoolean("correction", true)
+        set(value) { store.edit().putBoolean("correction", value).apply() }
     var learning: Boolean
         get() = store.getBoolean("learning", true)
         set(value) { store.edit().putBoolean("learning", value).apply() }

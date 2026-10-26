@@ -211,7 +211,7 @@ class InputDeviceTest {
             }
             key(KeyEvent.KEYCODE_ENTER); expect("かー、。", false)
             clearEditor()
-            fun tapEditorOffset(offset: Int) {
+            fun tapEditorOffset(offset: Int, longPress: Boolean = false) {
                 val location = IntArray(2)
                 var x = 0f; var y = 0f
                 instrumentation.runOnMainSync {
@@ -229,6 +229,7 @@ class InputDeviceTest {
                     event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
                     org.junit.Assert.assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true))
                     event.recycle()
+                    if (longPress && action == android.view.MotionEvent.ACTION_DOWN) Thread.sleep(800)
                 }
                 instrumentation.waitForIdleSync(); Thread.sleep(200)
             }
@@ -315,6 +316,22 @@ class InputDeviceTest {
             expect("日本語", true)
             key(KeyEvent.KEYCODE_ENTER); expect("日本語", false)
             clearEditor()
+            chooseSetting("予測変換オン")
+            chooseSetting("訂正候補オン")
+            type("nihongo"); expect("にほんご", true)
+            tapImeText("日本語"); expect("日本語", false)
+            type("ka"); expect("日本語か", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("日本語か", false)
+            clearEditor(); type("fuinki"); expect("ふいんき", true)
+            tapImeText("雰囲気（訂正）"); expect("雰囲気", false)
+            clearEditor(); type("fuinki"); expect("ふいんき", true)
+            tapImeText("そのまま：ふいんき"); expect("ふいんき", false)
+            chooseSetting("予測変換オフ")
+            clearEditor(); type("nihongo"); expect("にほんご", true)
+            key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("日本語", false)
+            chooseSetting("予測変換オン")
+            clearEditor()
             type("nihongo"); key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
             tapImeText("読みに戻す"); expect("にほんご", true)
             key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
@@ -347,6 +364,60 @@ class InputDeviceTest {
                 key(KeyEvent.KEYCODE_ENTER); expect(replacement, false)
                 clearEditor()
             }
+            // Range selection within reading retains the whole composing span.
+            fun selectReading(start: Int, end: Int) {
+                instrumentation.runOnMainSync { activity.editor.setSelection(start, end) }
+                instrumentation.waitForIdleSync(); Thread.sleep(150)
+            }
+            for (reverse in listOf(false, true)) {
+                clearEditor("😀")
+                type("nihongo")
+                selectReading(if (reverse) 5 else 3, if (reverse) 3 else 5)
+                expect("😀にほんご", true)
+                type("ka"); expect("😀にかご", true)
+                instrumentation.runOnMainSync {
+                    assertEquals(2, BaseInputConnection.getComposingSpanStart(activity.editor.text))
+                    assertEquals(5, BaseInputConnection.getComposingSpanEnd(activity.editor.text))
+                }
+                key(KeyEvent.KEYCODE_SPACE)
+                instrumentation.runOnMainSync { org.junit.Assert.assertTrue(BaseInputConnection.getComposingSpanStart(activity.editor.text) >= 0) }
+                key(KeyEvent.KEYCODE_ENTER)
+            }
+            clearEditor(); type("nihongo")
+            selectReading(1, 3); expect("にほんご", true)
+            key(KeyEvent.KEYCODE_DEL); expect("にご", true)
+            selectReading(0, 2)
+            key(KeyEvent.KEYCODE_FORWARD_DEL); expect("", false)
+            type("ka"); expect("か", true)
+            key(KeyEvent.KEYCODE_ENTER)
+            clearEditor(); type("nihongo")
+            selectReading(1, 3)
+            key(KeyEvent.KEYCODE_DPAD_LEFT)
+            type("ka"); expect("にかほんご", true)
+            key(KeyEvent.KEYCODE_ENTER)
+            clearEditor()
+            clearEditor(); type("kya")
+            selectReading(1, 2); expect("きゃ", true)
+            type("ku"); expect("きく", true)
+            key(KeyEvent.KEYCODE_ENTER)
+            clearEditor(); type("nihongo")
+            selectReading(1, 3)
+            key(KeyEvent.KEYCODE_MINUS); expect("にーご", true)
+            key(KeyEvent.KEYCODE_ENTER)
+            clearEditor()
+            type("nihongo")
+            tapEditorOffset(2, longPress = true)
+            expect("にほんご", true)
+            var replacedByLongPress = ""
+            instrumentation.runOnMainSync {
+                val start = minOf(activity.editor.selectionStart, activity.editor.selectionEnd)
+                val end = maxOf(activity.editor.selectionStart, activity.editor.selectionEnd)
+                org.junit.Assert.assertTrue("Long press selects a nonempty range", start >= 0 && end > start && end <= 4)
+                replacedByLongPress = "にほんご".replaceRange(start, end, "か")
+            }
+            type("ka"); expect(replacedByLongPress, true)
+            key(KeyEvent.KEYCODE_ENTER)
+            clearEditor()
             // Before conversion, arrows move the Mozc cursor without committing.
             type("kana")
             key(KeyEvent.KEYCODE_DPAD_LEFT); expect("かな", true)

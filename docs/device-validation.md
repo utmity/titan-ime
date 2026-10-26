@@ -239,3 +239,33 @@ An initial input-ready timeout was resolved by stopping the old harness process 
 
 
 Physical two-key check at 23:19 JST: Fn+O delivered key 43 without Shift (meta 0), changed the composing range length 8→9; Fn+U delivered key 49/meta 0 and returned length 9→8. Enter then committed. No app switch occurred. Final candidate text was 日本語を便供する: segment resizing may reselect conversion candidates, so this is not claimed as unchanged wording. Exact segment-span expansion/contraction is separately asserted in instrumentation. Physical evidence: test-results/two-key-physical.txt and .xml. Learning remains enabled.
+
+## Prediction, correction, dictionary and reading-range editing — 2026-10-26
+
+Continued PR #1 on codex/device-test-harness; starting local/remote HEAD was 76a288638e55c0f61a711b7a081947ff394ce63f, main 1da9d397663e947894b305941e95cc72fc810cec. Device TITAN20000052435 remained connected. No IME was uninstalled, no enabled-IME list or USB debugging setting was changed. Only Titan is enabled.
+
+The earlier pending reading-range work passed long-press injection (75.952s) before this task. It now ships with these changes: range selection entirely inside unconverted composition remains composing; replacement/deletion use native cursor/backspace operations. Both selection directions, emoji-prefixed offsets, small-kana replacement and punctuation replacement are exercised. This supersedes the previous range-editing limitation above; conversion-state ranges and selections crossing the composing boundary still finalize visible text.
+
+| Validation | Result | What was actually exercised |
+| --- | --- | --- |
+| MozcFeaturesTest, final APK | PASS, 0.310s | Real arm64 JNI, suggestions while typing, candidate update/submit, correction-on/off, original reading retained, user dictionary add/edit/delete, same-reading entries, learning-on/off, invalid input, normalization, duplicate import and TSV export/delete/import round trip |
+| DictionaryUiTest | PASS, 7.180s | Accessibility-driven actual settings/dictionary dialogs, search/edit/delete; standard Android create/open document pickers, UTF-8 TSV export and re-import |
+| DictionaryPersistenceTest | PASS, prepare 0.088s / verify 0.105s | Separate instrumentation processes with force-stop in between; registered entry appears in native conversion after restart |
+| Full InputDeviceTest | PASS, 85.356s | Injected keys/touches: prediction and correction tap commit, literal-reading control, prediction-off Space conversion, Fn toggle, Alt map/punctuation, segment movement/resizing, cursor/range editing, normal candidate selection and learning |
+| LearningPersistenceTest | PASS, 3.089s | Learned preferred candidate survives IME process restart after changing learning-off from incognito to NO_HISTORY |
+| Local build | PASS | Debug app and both test APKs; app/harness Lint and unsigned Release |
+
+These times describe test execution, not per-keystroke latency measurements. Raw results remain under ignored test-results/ (features-*, dictionary-persistence-*, physical-prediction-*). Test-added dictionary entries use unique names and only those entries were removed. The three document-picker test files were removed by exact path afterward; existing dictionary/history/user files were preserved. Settings finish with prediction, correction and learning on; Fn+Space; H/L navigation and U/O resizing.
+
+Physical trial: the user replied 操作済み. At 11:11:36 JST the final fuinki sequence retained composing [0,4), and at 11:11:40 the selection moved to 3 with composing removed. The subsequent nihongo sequence at 11:11:58 retained composing [3,7), and at 11:12:01 committed at selection 6. There was no Space key in either final sequence. The final UI dump shows **雰囲気日本語**, not the requested 日本語雰囲気: the user entered the two words in reverse order. Earlier attempts included additional toggles, deletion and Space; these are not silently treated as the exact scripted sequence. Combined with the user's candidate-tap instruction and completion report, this supports physical input plus prediction/correction selection in the harness. It is separate from the exact injected-tap assertions. No human dictionary-form/file-picker trial or other-editor compatibility is claimed.
+
+Measured correction coverage: fuinki → ふいんき remains uncommitted until selection; 雰囲気 has SPELLING_CORRECTION and is selectable before Space. shi/si both produce し. nihonngo produces にほんご via romaji nn handling. nihngo did not suggest 日本語, nihonfo suggested 日本フォ… alternatives rather than 日本語, and sunkai did not offer 深海. No general typo-model success is inferred from enabling a flag; OSS supplemental typing model is a stub. There is no automatic replacement or independent candidate reordering.
+
+Issues found and fixed during this work:
+- First build lacked ANDROID_HOME; rerun with the installed SDK. Android lint caught readNBytes requiring API 33; replaced with a bounded stream read supporting minSdk 28.
+- Native dictionary assertions initially failed with learning off. Upstream incognito excludes the user dictionary; NO_HISTORY now disables learning without excluding explicit entries. Full-length segment checks distinguish segmentation from absent entries.
+- Dictionary UI uppercased Latin words through Button's default all-caps styling; disabled it for entry rows.
+- Document creation with text/plain added .txt to .tsv; changed MIME type to text/tab-separated-values. Test selection also needed to click the containing document row, not its non-clickable title.
+- Instrumentation preference restoration now uses commit before process exit; production settings retain normal apply-based persistence. No failed attempt above is counted as a passing test.
+
+Remaining limits: arbitrary adjacent-key mistakes, missing/extra-key correction, custom physical-layout correction, unsupported POS types, paste and other-editor compatibility. The JNI bridge uses canonical dictionary storage plus RELOAD_AND_WAIT because the old dictionary-edit command IDs are reserved in this pinned revision; it does not pretend those removed APIs still exist. See prediction-dictionary.md and README for operations and scope.
