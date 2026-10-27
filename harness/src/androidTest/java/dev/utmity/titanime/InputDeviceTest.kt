@@ -248,6 +248,34 @@ class InputDeviceTest {
                 }
             }
             clearEditor()
+            // Releasing Ctrl while a letter remains held changes repeat routing.
+            // If an app received any Down, it must still receive the final Up.
+            instrumentation.runOnMainSync { activity.receivedKeys.clear() }
+            val heldAt = android.os.SystemClock.uptimeMillis()
+            instrumentation.sendKeySync(KeyEvent(heldAt, heldAt, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_R, 0, ctrl))
+            instrumentation.sendKeySync(KeyEvent(heldAt, heldAt + 100, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_R, 1, 0))
+            instrumentation.sendKeySync(KeyEvent(heldAt, heldAt + 200, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_R, 0, 0))
+            instrumentation.waitForIdleSync(); Thread.sleep(150)
+            instrumentation.runOnMainSync {
+                assertEquals("Final Up after a passed shortcut Down", 1,
+                    activity.receivedKeys.count { it.keyCode == KeyEvent.KEYCODE_R && it.action == KeyEvent.ACTION_UP })
+            }
+            clearEditor()
+            // Reverse direction: a Japanese letter was consumed before Ctrl was
+            // pressed during auto-repeat. The repeat forwarded to the app owns Up.
+            instrumentation.runOnMainSync { activity.receivedKeys.clear() }
+            val reverseHeldAt = android.os.SystemClock.uptimeMillis()
+            instrumentation.sendKeySync(KeyEvent(reverseHeldAt, reverseHeldAt, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_R, 0, 0))
+            instrumentation.sendKeySync(KeyEvent(reverseHeldAt, reverseHeldAt + 100, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_R, 1, ctrl))
+            instrumentation.sendKeySync(KeyEvent(reverseHeldAt, reverseHeldAt + 200, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_R, 0, ctrl))
+            instrumentation.waitForIdleSync(); Thread.sleep(150)
+            instrumentation.runOnMainSync {
+                assertEquals("Forwarded repeat Down", 1,
+                    activity.receivedKeys.count { it.keyCode == KeyEvent.KEYCODE_R && it.action == KeyEvent.ACTION_DOWN })
+                assertEquals("Final Up after forwarded repeat", 1,
+                    activity.receivedKeys.count { it.keyCode == KeyEvent.KEYCODE_R && it.action == KeyEvent.ACTION_UP })
+            }
+            clearEditor()
             // A modifier press alone must not commit before its punctuation arrives.
             type("ka")
             vendorFn(KeyEvent.ACTION_DOWN)

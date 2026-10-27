@@ -26,7 +26,9 @@ class TitanImeService : InputMethodService() {
     private var output = Output.getDefaultInstance()
     private var candidateRow: LinearLayout? = null
     private val titanFnDevices = mutableSetOf<Int>()
-    private val consumedKeys = mutableSetOf<Pair<Int, Int>>()
+    // True only if every Down in this physical press was consumed. If any
+    // repeat reached the app, the matching Up must also reach it.
+    private val consumedKeys = mutableMapOf<Pair<Int, Int>, Boolean>()
 
     override fun onCreate() {
         super.onCreate()
@@ -40,7 +42,7 @@ class TitanImeService : InputMethodService() {
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (isTitanFn(event)) titanFnDevices.remove(event.deviceId)
-        if (consumedKeys.remove(event.deviceId to keyCode)) return true
+        if (consumedKeys.remove(event.deviceId to keyCode) == true) return true
         return super.onKeyUp(keyCode, event)
     }
 
@@ -329,7 +331,9 @@ class TitanImeService : InputMethodService() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val consumed = handleKey(keyCode, event)
-        if (consumed) consumedKeys.add(event.deviceId to keyCode)
+        val key = event.deviceId to keyCode
+        consumedKeys[key] = if (event.repeatCount == 0) consumed
+            else consumed && consumedKeys[key] != false
         return consumed
     }
 

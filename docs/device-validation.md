@@ -302,3 +302,21 @@ this follow-up adds regression protection, not another production routing change
 These are injected Android events. ChatGPT-specific clipboard handling and
 physical clipboard chords in other editors remain unverified.
 
+## 2026-10-27: final Up after modifier changes during repeat
+
+Reproduced with injected events on T2E before fixing: Japanese mode received
+Ctrl+R Down (passed to the app), then unmodified R repeat Down (consumed by Mozc),
+then R Up. The app observed zero Up events; the assertion expected one and failed
+after 25.970 seconds. The previous consumed-key set remembered any consumed Down
+and incorrectly suppressed Up even though the app had received another Down.
+
+The per-device/key record now suppresses Up only when every Down of that press
+was consumed. An initial Down resets the record; release and input lifecycle
+transitions clear it. Repeat text/shortcut routing remains unchanged.
+
+After fixing and reinstalling, the full injected suite PASS (101.357 seconds),
+including both Ctrl release and Ctrl press during R repeat, existing held-modifier
+checks, clipboard editing and Japanese conversion regressions. Debug/Release
+builds and app/harness Lint PASS (23 seconds). This verifies Android event routing;
+the precise physical hold/release sequence has not been manually reproduced.
+

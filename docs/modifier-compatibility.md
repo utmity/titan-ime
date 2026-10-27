@@ -15,6 +15,10 @@ Modifiers alone do not commit a reading. App shortcuts finish an active reading
 and pass the original Down/Up events. A selected reading is finished in place so
 copy/cut can retain the selected editor range. Consumed character keys retain the
 existing matching-Up suppression; no synthetic early Up is generated for shortcuts.
+Up suppression is tracked for the complete key press, including auto-repeat.
+If any Down reached the app, Up must reach it even if a modifier change caused
+another Down in the same press to be consumed by Mozc. A new initial Down resets
+this record; key release and input lifecycle transitions clear it.
 
 ## Findings on Titan 2 Elite
 
