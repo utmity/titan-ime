@@ -539,7 +539,7 @@ class InputDeviceTest {
                 var range = -1 to -1
                 instrumentation.runOnMainSync {
                     val text = targetEditor.text
-                    val spans = text.getSpans(0, text.length, android.text.style.BackgroundColorSpan::class.java)
+                    val spans = text.getSpans(0, text.length, android.text.style.StyleSpan::class.java)
                     org.junit.Assert.assertEquals("Exactly one focused Mozc segment", 1, spans.size)
                     range = text.getSpanStart(spans[0]) to text.getSpanEnd(spans[0])
                 }

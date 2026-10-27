@@ -127,6 +127,7 @@ class TitanImeService : InputMethodService() {
         }
         if (preedit.isEmpty()) return
         val ic = currentInputConnection ?: return
+        if (!synchronizeEditor(ic)) return
         if (candidatesStart >= 0 && candidatesEnd - candidatesStart == preedit.length &&
             newSelStart != newSelEnd && newSelStart in candidatesStart..candidatesEnd &&
             newSelEnd in candidatesStart..candidatesEnd && !output.preedit.hasHighlightedPosition()) {
@@ -178,6 +179,7 @@ class TitanImeService : InputMethodService() {
 
     private fun moveSegment(key: MozcKey.SpecialKey, shift: Boolean = false) {
         val ic = currentInputConnection ?: return
+        if (!synchronizeEditor(ic)) return
         if (!output.preedit.hasHighlightedPosition()) return
         val event = MozcKey.newBuilder().setSpecialKey(key)
         if (shift) event.addModifierKeys(MozcKey.ModifierKey.SHIFT)
@@ -192,7 +194,8 @@ class TitanImeService : InputMethodService() {
                 setTextColor(android.graphics.Color.DKGRAY)
                 setPadding(12, 12, 12, 12)
             })
-            val window = output.candidateWindow
+            val candidates = CandidatePresentation.candidates(output)
+            val focusedId = CandidatePresentation.focusedId(output)
             if (preedit.isNotEmpty() && !output.preedit.hasHighlightedPosition()) {
                 addView(TextView(this@TitanImeService).apply {
                     text = "そのまま：$preedit"
@@ -208,6 +211,7 @@ class TitanImeService : InputMethodService() {
                     setPadding(18, 12, 18, 12)
                     setOnClickListener {
                         val ic = currentInputConnection ?: return@setOnClickListener
+                        if (!synchronizeEditor(ic)) return@setOnClickListener
                         engine?.key(MozcKey.newBuilder().setSpecialKey(MozcKey.SpecialKey.ESCAPE).build())
                             ?.let { applyOutput(ic, it) }
                     }
@@ -221,17 +225,17 @@ class TitanImeService : InputMethodService() {
                     })
                 }
             }
-            if (window.candidateCount == 0) addView(TextView(this@TitanImeService).apply {
+            if (candidates.isEmpty()) addView(TextView(this@TitanImeService).apply {
                 text = preedit
                 textSize = 18f
                 setTextColor(android.graphics.Color.BLACK)
                 setPadding(18, 12, 18, 12)
             })
-            for (candidate in window.candidateList) {
+            for (candidate in candidates) {
                 addView(TextView(this@TitanImeService).apply {
                     val attributes = output.allCandidateWords.candidatesList.firstOrNull { it.id == candidate.id }?.attributesList.orEmpty()
                     val correction = attributes.any { it.name == "SPELLING_CORRECTION" || it.name == "TYPING_CORRECTION" }
-                    text = (if (window.hasFocusedIndex() && window.focusedIndex == candidate.index) "● " else "") + candidate.value +
+                    text = (if (focusedId == candidate.id) "● " else "") + candidate.value +
                         (if (correction) "（訂正）" else "")
                     contentDescription = candidate.value + if (correction) " 訂正候補 ${candidate.annotation.description}" else " 候補"
                     textSize = 18f
@@ -239,6 +243,7 @@ class TitanImeService : InputMethodService() {
                     setPadding(18, 12, 18, 12)
                     setOnClickListener {
                         val ic = currentInputConnection ?: return@setOnClickListener
+                        if (!synchronizeEditor(ic)) return@setOnClickListener
                         val result = engine?.command(if (output.preedit.hasHighlightedPosition())
                             SessionCommand.CommandType.HIGHLIGHT_CANDIDATE else SessionCommand.CommandType.SUBMIT_CANDIDATE, candidate.id)
                             ?: return@setOnClickListener
@@ -284,12 +289,21 @@ class TitanImeService : InputMethodService() {
                 var offset = 0
                 for (segment in result.preedit.segmentList) {
                     if (segment.annotation == Preedit.Segment.Annotation.HIGHLIGHT) {
-                        styled.setSpan(android.text.style.BackgroundColorSpan(0xFFBBDEFB.toInt()),
+                        // The editor owns its colors (including dark themes).
+                        // Mark the focused segment without painting behind its text.
+                        styled.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                            offset, offset + segment.value.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        styled.setSpan(android.text.style.UnderlineSpan(),
                             offset, offset + segment.value.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                     }
                     offset += segment.value.length
                 }
                 ic.setComposingText(styled, 1)
+                preedit = next
+                output = result
+                // A normalizing editor may have changed both text and its length.
+                // Verify before forcing Mozc's cursor onto that different text.
+                if (!synchronizeEditor(ic)) return
                 if (compositionStart >= 0) {
                     val cursor = next.offsetByCodePoints(0, result.preedit.cursor.coerceIn(0, next.codePointCount(0, next.length)))
                     ic.setSelection(compositionStart + cursor, compositionStart + cursor)
@@ -306,7 +320,31 @@ class TitanImeService : InputMethodService() {
         refreshStrip()
     }
 
+    /** An editor may normalize setComposingText without changing selection or
+     * dropping its composing range. Compare actual text, not just range length.
+     * Missing/partial snapshots are unknown, never evidence to erase text. */
+    private fun synchronizeEditor(ic: InputConnection): Boolean {
+        if (preedit.isEmpty() || compositionStart < 0) return true
+        val snapshot = ic.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0) ?: return true
+        val text = snapshot.text ?: return true
+        val start = compositionStart - snapshot.startOffset
+        val end = start + preedit.length
+        if (start < 0 || end > text.length) return true
+        if (text.subSequence(start, end).toString() == preedit) return true
+        // Retain the host's authoritative text/selection, discard stale engine
+        // candidates, and start the next keystroke as a new composition.
+        ic.finishComposingText()
+        preedit = ""
+        compositionStart = -1
+        selectedReading = null
+        output = Output.getDefaultInstance()
+        engine?.start()
+        refreshStrip()
+        return false
+    }
+
     private fun commitComposition(ic: InputConnection) {
+        if (!synchronizeEditor(ic)) return
         if (preedit.isEmpty()) return
         // Ask Mozc to resolve pending romaji (notably final n) before kana commitment.
         // An already converted candidate must retain the user's selected spelling.
@@ -344,6 +382,7 @@ class TitanImeService : InputMethodService() {
             android.util.Log.i("TitanImeProbe", "key=$keyCode meta=${event.metaState} japanese=$japanese connected=${currentInputConnection != null}")
         }
         val ic = currentInputConnection ?: return super.onKeyDown(keyCode, event)
+        synchronizeEditor(ic)
         if (preferences.matchesToggle(event, event.isFunctionPressed || event.deviceId in titanFnDevices)) {
             if (event.repeatCount == 0 && engine != null && !directField) {
                 if (japanese) commitComposition(ic)

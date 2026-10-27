@@ -14,11 +14,23 @@ class InputTestActivity : Activity() {
     lateinit var secondEditor: EditText
     private lateinit var events: TextView
     val receivedKeys = mutableListOf<KeyEvent>()
+    var rewriteNextComposition: String? = null
     override fun onCreate(state: Bundle?) {
         setTheme(android.R.style.Theme_Material_Light_NoActionBar)
         super.onCreate(state)
         window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-        editor = EditText(this).apply {
+        editor = object : EditText(this) {
+            override fun onCreateInputConnection(info: android.view.inputmethod.EditorInfo): android.view.inputmethod.InputConnection? {
+                val original = super.onCreateInputConnection(info) ?: return null
+                return object : android.view.inputmethod.InputConnectionWrapper(original, false) {
+                    override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                        val replacement = rewriteNextComposition
+                        rewriteNextComposition = null
+                        return super.setComposingText(replacement ?: text, newCursorPosition)
+                    }
+                }
+            }
+        }.apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             hint = "Titan IME input test"
             minLines = 2

@@ -320,3 +320,69 @@ checks, clipboard editing and Japanese conversion regressions. Debug/Release
 builds and app/harness Lint PASS (23 seconds). This verifies Android event routing;
 the precise physical hold/release sequence has not been manually reproduced.
 
+## 2026-10-27: editor normalization, initial candidates and contrast
+
+Starting HEAD: 5eef9d0be3ae81347a45f4ae479a522ba4941d7c, branch
+codex/device-test-harness, PR #1. Its CI run 40427213091 was cancelled, not a pass;
+the earlier b5ff1f7 CI passed. No Shift hardware or Discord uppercase fix is included.
+
+Reproduction before fixes:
+- Native asynchronous setText and restartInput cases passed unchanged.
+- A composing InputConnection that synchronously changes k to 別 or 別名 lost
+  that host text on the next a: actual か instead of 別あ / 別名あ. Both failed.
+- Color ownership assertion failed: one fixed BackgroundColorSpan was present.
+- After Space, native EditText and local WebView showed 日本語 but no selectable
+  candidates. Screenshots confirmed the strip itself was present. Pinned Mozc
+  filled all_candidate_words while leaving candidate_window absent on first Space.
+
+Fixes and verification:
+- Compare available actual editor text with the reading before continuing a
+  session/candidate action, and immediately after writing composition before
+  applying Mozc's cursor. A confirmed mismatch retains the host text/selection
+  and discards the stale session. Same/different-length normalization now passes.
+- Bold plus underline replaces the fixed segment background. Light/dark EditText
+  span assertions pass and captured screens show readable black/white text.
+- First conversion uses up to eight native all_candidate_words when the desktop
+  candidate window is absent. Real JNI CandidatePresentationTest PASS (0.110s):
+  first-Space window absent, native candidates present, valid IDs highlight/commit.
+- EditorCompatibilityTest PASS, 8 tests (23.735s): setText, synchronous
+  normalization, restartInput, hide/fresh-input/refocus, light/dark editor colors,
+  local WebView conversion and a JavaScript value rewrite. No remote web content.
+
+Failed attempts are separate: an APK-update input readiness failure preceded the
+functional rerun; the fixture now waits for window focus before restartInput.
+The first recovery test incorrectly expected another Space to convert after
+Android hid the input view and finalized composition. It now checks fresh input
+and candidate recovery rather than forcing reconversion of committed text.
+
+These are automated operations on the actual T2E. The user clarified Discord's
+symptom as “romaji does not become kana” and opened the affected channel-name
+field. A read-only capture showed com.discord, inputType=0x90, imeOptions=0x6,
+fieldId=1362, Titan selected, and Japanese mode enabled. The field has no text
+class and contains visible-password variation bits, so Titan's existing direct
+input policy applies. This establishes why this observed field bypasses Mozc;
+it does not establish a React rewriting defect. No Discord name was typed/saved,
+no package-specific exception was added, and no Discord conversion fix is claimed.
+See editor-compatibility.md for implementation scope and limitations.
+
+Additional results: full InputDeviceTest PASS (108.661s), including previous Fn,
+Alt/Meta-policy, held/repeated Ctrl event, punctuation, segments, selection,
+clipboard, prediction and learning coverage. Debug/Release and both Lints PASS.
+MozcFeaturesTest, KanaCorrectionTest and CandidatePresentationTest also passed
+in the combined native run; the initial picker test in that run failed before
+opening UI because Android 16 blocks direct enabled_input_methods settings reads
+for target SDK 35. It now uses InputMethodManager.enabledInputMethodList.
+
+Manual ADB UI verification with Titan selected displayed the standard Android
+picker with Kika and Titan entries; dismissed without selecting anything. The
+Kika-selected picker test passed (1.643s), and the original Titan selection was
+restored. A test in the IME's own instrumentation process was timing-sensitive
+while restarting the selected IME, so the picker test was moved into the separate
+harness process. No IME was enabled/disabled, no user dictionary was removed,
+and the observed left Shift hardware issue remains outside this change.
+
+Final isolated picker tests PASS: Titan selected 1.316s, Kika selected 1.701s;
+both assert that selected/enabled IME state is unchanged by opening/dismissing.
+Final EditorCompatibilityTest PASS, 9 tests (25.903s), now including the observed
+0x90 direct-input flags and successful kana input after returning to a text field.
+
