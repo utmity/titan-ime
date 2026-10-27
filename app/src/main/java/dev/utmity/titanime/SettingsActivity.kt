@@ -4,7 +4,7 @@ import android.app.Activity
 import android.os.Bundle
 import android.widget.*
 
-/** Local preferences only; no IME selection or system settings are changed. */
+/** Local preferences and a user-invoked system picker; never selects an IME itself. */
 class SettingsActivity : Activity() {
     private lateinit var preferences: ImePreferences
     private lateinit var mode: TextView
@@ -27,6 +27,12 @@ class SettingsActivity : Activity() {
         fun text(value: String) = TextView(this).apply { text = value; textSize = 18f; content.addView(this) }
         text("Titan IME 設定")
         mode = text("")
+        content.addView(Button(this).apply {
+            text = "入力方法を切り替える"
+            setOnClickListener {
+                getSystemService(android.view.inputmethod.InputMethodManager::class.java).showInputMethodPicker()
+            }
+        })
         content.addView(Button(this).apply { text = "ユーザー辞書"; setOnClickListener {
             startActivity(android.content.Intent(this@SettingsActivity, UserDictionaryActivity::class.java))
         } })
