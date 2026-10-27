@@ -10,6 +10,7 @@ Mozc remains at `c4b2aef7c65e61be394bacadaec200eb5b97f91c`; the native engine an
 - [engine/modules.cc](https://github.com/google/mozc/blob/c4b2aef7c65e61be394bacadaec200eb5b97f91c/src/engine/modules.cc): the OSS supplemental typing model is a stub. A true use_typing_correction flag alone does not implement general QWERTY typo repair. No proprietary model is included.
 - [correction_rewriter.cc](https://github.com/google/mozc/blob/c4b2aef7c65e61be394bacadaec200eb5b97f91c/src/rewriter/correction_rewriter.cc): standard reading corrections use the bundled OSS reading-correction data. Verified example is ふいんき → 雰囲気. Romaji alternatives such as shi/si are composer behavior, not evidence for arbitrary missing/extra-key correction.
 - Context and learned ranking remain within the same Mozc session and native history predictor. Titan does not independently rerank user dictionary/history candidates. Existing learning persistence tests remain separate from prediction tests.
+- Kana-modifier-insensitive lookup uses Config.use_kana_modifier_insensitive_conversion with Request.kana_modifier_insensitive_conversion enabled. The correction preference controls the Config gate; correction-off tests confirm expanded candidates disappear. It expands voicing/semi-voicing/small-kana variants through the existing dictionary, not a new typo model. These candidates lack the public correction attribute and are not mislabeled as spelling corrections.
 
 ## User dictionary integration
 
@@ -28,6 +29,8 @@ Prediction taps use SUBMIT_CANDIDATE and apply its native result/preedit togethe
 Pending range-editing work is included: an Android selection wholly inside a reading preedit is tracked as UTF-16 bounds, then converted to Mozc code points. MOVE_CURSOR plus native BACKSPACE deletes the selected reading before insertion. Selection outside the composing range or during conversion still finalizes visible text. Long-press selection, reverse selection, emoji offsets, small kana and punctuation replacement are covered in the harness.
 
 ## Verification types
+
+- `KanaCorrectionTest`: real native candidate differences with correction off/on, katukou → 学校 and hiyouin → 病院 predictions, han → パン conversion, unchanged preedit, native submission, and an exact-reading user dictionary candidate retaining first position. General gakukou → 学校 repair remains unsupported. A small timing snapshot is recorded in device-validation.md, not claimed as a benchmark.
 
 - `MozcFeaturesTest`: real arm64 JNI and OSS data on the T2E; prediction update/commit, standard correction and correction-off, romaji alternatives, diagnostic unsupported typo cases, dictionary add/edit/delete, multiple same-reading entries, learning-on/off coexistence, UTF-8 TSV round trip, duplicate handling and invalid-input rejection. It removes only uniquely named test entries and restores its preference baseline synchronously.
 - `DictionaryUiTest`: Android accessibility operations on the actual settings/dictionary activities; registration, search, editing and confirmed deletion. This is automation, not human touch.

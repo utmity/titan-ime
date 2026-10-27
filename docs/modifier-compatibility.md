@@ -53,3 +53,13 @@ append `3` without reverting the line. Check actual remapped Ctrl+A and Ctrl+C.
 In Meta mode, test an intentional terminal Meta binding. Restore Alt text mode.
 Record physical results separately from injected events and native KCM assertions.
 ChatGPT-specific behavior and other editors require their own checks.
+
+Physical outcome (October 26 trial, final inspection October 27): Alt+R appended
+`3` to `echo TITANALT`, and execution printed `TITANALT3`. The actual remapped
+right Shift+ C cancelled `abc`, showing `abc^C` and a new prompt. After selecting
+Meta mode in Settings, physical Alt+B moved from the end of `echo METATEST` to
+the first `M`, without inserting the Alt-layer `!`. Alt text mode was restored
+after inspection and verified checked in Settings. These observations confirm
+these specific physical operations, not every Ctrl/Alt combination or clipboard
+operation in other apps. The original Alt+R revert-line binding itself was not
+queried; its precise shell action remains an inference from upstream routing.
