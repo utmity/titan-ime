@@ -284,3 +284,21 @@ Final harness follow-up: prediction/correction-on password input remained litera
 
 Details and remaining terminal limitations: [modifier compatibility](modifier-compatibility.md).
 
+## 2026-10-27: clipboard and composing-range regression
+
+Full injected suite PASS (100.721 seconds); harness test APK build and lint PASS.
+New cases exercise the selected IME and a real EditText, not a mocked connection:
+
+- Copy the selected ほん inside composing にほんご: composition ends, selection
+  remains 1..3, clipboard contains only ほん, and paste at the end gives にほんごほん.
+- Cut that same range gives にご; paste restores にほんご. Continuing ka at the
+  restored cursor gives composing にほんかご; Enter commits without duplication.
+- Ctrl+A/X/V on a whole Japanese reading restores にほんご.
+- English Ctrl+A/C/V produces abcabc.
+
+The test saves the existing ClipData and restores it in finally without logging
+its content. The previous modifier implementation passed these cases unchanged;
+this follow-up adds regression protection, not another production routing change.
+These are injected Android events. ChatGPT-specific clipboard handling and
+physical clipboard chords in other editors remain unverified.
+

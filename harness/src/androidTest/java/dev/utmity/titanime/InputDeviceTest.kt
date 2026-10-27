@@ -179,6 +179,49 @@ class InputDeviceTest {
                 instrumentation.waitForIdleSync()
             }
             fun type(text: String) { text.forEach { key(KeyEvent.KEYCODE_A + (it - 'a')) } }
+            // Exercise editor shortcuts through the IME without retaining or logging
+            // the user's clipboard. Restore the exact original ClipData in finally.
+            val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+            var savedClip: android.content.ClipData? = null
+            instrumentation.runOnMainSync { savedClip = clipboard.primaryClip }
+            try {
+                fun select(start: Int, end: Int) {
+                    instrumentation.runOnMainSync { activity.editor.setSelection(start, end) }
+                    instrumentation.waitForIdleSync(); Thread.sleep(150)
+                }
+                clearEditor(); type("nihongo"); expect("にほんご", true)
+                select(1, 3)
+                key(KeyEvent.KEYCODE_C, KeyEvent.META_CTRL_ON)
+                expect("にほんご", false)
+                instrumentation.runOnMainSync {
+                    assertEquals("ほん", clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+                    assertEquals(1, activity.editor.selectionStart)
+                    assertEquals(3, activity.editor.selectionEnd)
+                }
+                select(4, 4); key(KeyEvent.KEYCODE_V, KeyEvent.META_CTRL_ON)
+                expect("にほんごほん", false)
+
+                clearEditor(); type("nihongo"); select(1, 3)
+                key(KeyEvent.KEYCODE_X, KeyEvent.META_CTRL_ON); expect("にご", false)
+                key(KeyEvent.KEYCODE_V, KeyEvent.META_CTRL_ON); expect("にほんご", false)
+                type("ka"); expect("にほんかご", true)
+                key(KeyEvent.KEYCODE_ENTER); expect("にほんかご", false)
+
+                clearEditor(); type("nihongo")
+                key(KeyEvent.KEYCODE_A, KeyEvent.META_CTRL_ON)
+                key(KeyEvent.KEYCODE_X, KeyEvent.META_CTRL_ON); expect("", false)
+                key(KeyEvent.KEYCODE_V, KeyEvent.META_CTRL_ON); expect("にほんご", false)
+                // English shortcuts still belong to EditText.
+                toggle(); clearEditor(); type("abc")
+                key(KeyEvent.KEYCODE_A, KeyEvent.META_CTRL_ON)
+                key(KeyEvent.KEYCODE_C, KeyEvent.META_CTRL_ON)
+                select(3, 3); key(KeyEvent.KEYCODE_V, KeyEvent.META_CTRL_ON)
+                expect("abcabc", false); toggle()
+            } finally {
+                instrumentation.runOnMainSync {
+                    savedClip?.let { clipboard.setPrimaryClip(it) } ?: clipboard.clearPrimaryClip()
+                }
+            }
             // A held physical modifier/chord must not receive a synthetic early Up.
             clearEditor(); type("ka"); expect("か", true)
             instrumentation.runOnMainSync { activity.receivedKeys.clear() }

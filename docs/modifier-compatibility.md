@@ -63,3 +63,8 @@ after inspection and verified checked in Settings. These observations confirm
 these specific physical operations, not every Ctrl/Alt combination or clipboard
 operation in other apps. The original Alt+R revert-line binding itself was not
 queried; its precise shell action remains an inference from upstream routing.
+
+The October 27 injected EditText regression additionally verifies Ctrl+C/X/V on a
+selected reading, full-reading Ctrl+A/X/V, further Japanese input after paste,
+and English Ctrl+A/C/V. It restores the previous clipboard in finally. This does
+not establish clipboard compatibility with ChatGPT or all terminal applications.
