@@ -5,6 +5,18 @@ import android.view.KeyEvent
 
 internal class ImePreferences(context: Context) {
     val store = context.getSharedPreferences("ime_settings", Context.MODE_PRIVATE)
+    var editing: Boolean
+        get() = store.getBoolean("editing", true)
+        set(value) { store.edit().putBoolean("editing", value).apply() }
+    var clipboardKey: String
+        get() = store.getString("clipboard_key", "v") ?: "v"
+        set(value) { store.edit().putString("clipboard_key", value).apply() }
+    var editingLayout: String
+        get() = store.getString("editing_layout", "hjkl") ?: "hjkl"
+        set(value) { store.edit().putString("editing_layout", value).apply() }
+    var wordDelete: Boolean
+        get() = store.getBoolean("word_delete", false)
+        set(value) { store.edit().putBoolean("word_delete", value).apply() }
     var altText: Boolean
         get() = store.getBoolean("alt_text", true)
         set(value) { store.edit().putBoolean("alt_text", value).apply() }
