@@ -25,6 +25,7 @@ kotlin {
 }
 
 dependencies {
+    implementation("androidx.autofill:autofill:1.1.0")
     implementation("com.google.protobuf:protobuf-javalite:4.34.1")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:runner:1.6.2")

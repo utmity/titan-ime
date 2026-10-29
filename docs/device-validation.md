@@ -386,3 +386,39 @@ both assert that selected/enabled IME state is unchanged by opening/dismissing.
 Final EditorCompatibilityTest PASS, 9 tests (25.903s), now including the observed
 0x90 direct-input flags and successful kana input after returning to a text field.
 
+# 2026-10-29: batch synchronization and editing support
+
+- Actual physical ChatGPT trial: user confirmed composition remained active and
+  repeated Space (including more than twice) continued conversion. No message was
+  sent by the agent. Debug metadata trace retained conversion state; diagnostic
+  logging was then disabled. See batch-editor-synchronization.md for before/after.
+- Candidate visibility: found input-view flag true with hidden IME window;
+  checking decor visibility fixed the reproduced missing-show-request case.
+  Compatibility suite before new features: 10 tests PASS, 28.224 s.
+- New EditingSupportTest: 3 tests PASS, 0.061 s (isolated bounded history,
+  opt-out/sensitive/size exclusion, duplicate/pin/delete/reopen, paired navigation
+  events/modifier exclusions, unsupported inline UI request).
+- ClipboardIntegrationTest: PASS, 6.351 s. Real ClipboardManager notification,
+  physical-event injection to open/search/select/paste, pin/persistence/delete,
+  and sensitive clip exclusion. Existing history was retained; temporary settings
+  and the captured clipboard were restored. This is not human physical-key proof.
+- Earlier integration attempts failed because app instrumentation replaced the IME
+  process without rebinding. A failure-cleanup bug could clear the current clipboard
+  before capturing it; it was corrected with an explicit capture guard and disclosed
+  to the user. No dictionary or learning data was cleared. Test rebind uses only an
+  already enabled fallback and restores Titan; no IME is enabled/uninstalled.
+- New navigation/compatibility suite: 11 tests PASS, 32.728 s. Reading insertion,
+  emoji navigation, anchored surrogate/combining selection and multiline movement.
+  A test initially showed that synthetic Shift meta alone did not extend EditText
+  selection; horizontal extension now uses full snapshots and ICU boundaries.
+- Final compatibility suite including menu/history open-close composition
+  preservation: 12 tests PASS, 37.450 s.
+- Full injected input regression PASS, 105.299 s. An initial connection-not-ready
+  failure after app instrumentation was retained; reconnecting before the retry
+  resolved it. Existing modifier, password, native input and editing cases passed.
+- Debug/test APK and unsigned Release builds, app/harness Lint passed. The merged
+  application manifest adds no permissions and retains allowBackup=false.
+- Actual new Fn navigation/panel keys, LINE/Discord/Termux physical regression,
+  provider-backed inline autofill, and cross-app Undo/Redo remain unverified unless
+  separately recorded below. Password-field inline autofill is not implemented.
+

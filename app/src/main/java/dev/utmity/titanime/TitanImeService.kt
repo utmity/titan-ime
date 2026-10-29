@@ -25,13 +25,38 @@ class TitanImeService : InputMethodService() {
     private var preedit = ""
     private var output = Output.getDefaultInstance()
     private var candidateRow: LinearLayout? = null
+    private var supportPanel: LinearLayout? = null
+    private var panel = ""
+    private var historyQuery = ""
+    private var historyIndex = 0
+    private var inlineGeneration = 0
+    private var autofillRow: LinearLayout? = null
+    private val history by lazy { ClipboardHistory(this) }
+    private val clipboard by lazy { getSystemService(android.content.ClipboardManager::class.java) }
+    private val clipListener = android.content.ClipboardManager.OnPrimaryClipChangedListener {
+        if (currentInputStarted && !directField && currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0 && history.enabled) {
+            val clip = clipboard.primaryClip
+            val sensitive = clip?.description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
+            if (clip != null && clip.itemCount == 1) clip.getItemAt(0).text?.let { history.capture(it.toString(), sensitive) }
+            if (panel == "history") renderPanel()
+        }
+    }
     private val titanFnDevices = mutableSetOf<Int>()
     // True only if every Down in this physical press was consumed. If any
     // repeat reached the app, the matching Up must also reach it.
     private val consumedKeys = mutableMapOf<Pair<Int, Int>, Boolean>()
+    private var traceRevision = 0L
+    private var writingBatch = false
+    private fun traceState(event: String) {
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
+            !directField && android.util.Log.isLoggable("TitanState", android.util.Log.DEBUG)) {
+            android.util.Log.d("TitanState", "rev=$traceRevision batch=$writingBatch preedit=${preedit.length} start=$compositionStart conversion=${output.preedit.hasHighlightedPosition()} $event")
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
+        clipboard.addPrimaryClipChangedListener(clipListener)
         japanese = preferences.japanese
         try { engine = MozcEngine(this) }
         catch (error: Exception) { android.util.Log.e("TitanImeProbe", "Mozc initialization failed", error) }
@@ -40,6 +65,40 @@ class TitanImeService : InputMethodService() {
 
     private fun isTitanFn(event: KeyEvent) = event.keyCode == 403 && event.scanCode == 251
 
+    override fun onDestroy() {
+        clipboard.removePrimaryClipChangedListener(clipListener)
+        super.onDestroy()
+    }
+
+    @android.annotation.TargetApi(30)
+    override fun onCreateInlineSuggestionsRequest(uiExtras: android.os.Bundle): android.view.inputmethod.InlineSuggestionsRequest? {
+        // Preserve the password/direct-field bypass. No secret is read through
+        // InputConnection or copied into the IME's own data model.
+        if (directField) return null
+        if (!androidx.autofill.inline.UiVersions.getVersions(uiExtras).contains(androidx.autofill.inline.UiVersions.INLINE_UI_VERSION_1)) return null
+        val height = (48 * resources.displayMetrics.density).toInt()
+        val styles = androidx.autofill.inline.UiVersions.newStylesBuilder()
+            .addStyle(androidx.autofill.inline.v1.InlineSuggestionUi.newStyleBuilder().build()).build()
+        val spec = android.widget.inline.InlinePresentationSpec.Builder(android.util.Size(0, height),
+            android.util.Size(resources.displayMetrics.widthPixels, height)).setStyle(styles).build()
+        return android.view.inputmethod.InlineSuggestionsRequest.Builder(listOf(spec)).setMaxSuggestionCount(3).build()
+    }
+
+    @android.annotation.TargetApi(30)
+    override fun onInlineSuggestionsResponse(response: android.view.inputmethod.InlineSuggestionsResponse): Boolean {
+        val generation = ++inlineGeneration
+        autofillRow?.removeAllViews()
+        if (directField || response.inlineSuggestions.isEmpty()) return false
+        val row = autofillRow ?: return false
+        response.inlineSuggestions.take(3).forEach { suggestion ->
+            val size = suggestion.info.inlinePresentationSpec.minSize
+            suggestion.inflate(this, android.util.Size(-2, size.height), mainExecutor) { content ->
+                if (generation == inlineGeneration && currentInputStarted && !directField && content != null) row.addView(content)
+            }
+        }
+        return true
+    }
+
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (isTitanFn(event)) titanFnDevices.remove(event.deviceId)
         if (consumedKeys.remove(event.deviceId to keyCode) == true) return true
@@ -47,6 +106,8 @@ class TitanImeService : InputMethodService() {
     }
 
     override fun onFinishInput() {
+        panel = ""; inlineGeneration++; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
+        traceState("finishInput")
         engine?.close()
         engine?.sync()
         preedit = ""
@@ -64,7 +125,7 @@ class TitanImeService : InputMethodService() {
     override fun onEvaluateFullscreenMode() = false
     override fun onEvaluateInputViewShown(): Boolean {
         super.onEvaluateInputViewShown()
-        return japanese && !directField
+        return !directField
     }
 
     // A compact input view is used instead of the candidates-only window, which
@@ -80,6 +141,10 @@ class TitanImeService : InputMethodService() {
             candidateRow = LinearLayout(this@TitanImeService).also { addView(it) }
         }
         addView(scroll, LinearLayout.LayoutParams(-1, -2))
+        autofillRow = LinearLayout(this@TitanImeService)
+        addView(HorizontalScrollView(this@TitanImeService).apply { addView(autofillRow) })
+        supportPanel = LinearLayout(this@TitanImeService).apply { orientation = LinearLayout.VERTICAL }
+        addView(supportPanel, LinearLayout.LayoutParams(-1, -2))
         val spacer = View(this@TitanImeService)
         addView(spacer, LinearLayout.LayoutParams(-1, navigationClearance))
         setOnApplyWindowInsetsListener { _, insets ->
@@ -96,6 +161,7 @@ class TitanImeService : InputMethodService() {
     }
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
+        panel = ""; inlineGeneration++; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
         super.onStartInput(attribute, restarting)
         engine?.setLearning(preferences.learning)
         engine?.start()
@@ -110,6 +176,7 @@ class TitanImeService : InputMethodService() {
         directField = (type and InputType.TYPE_MASK_CLASS) != InputType.TYPE_CLASS_TEXT ||
             variation in setOf(InputType.TYPE_TEXT_VARIATION_PASSWORD,
                 InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)
+        traceState("startInput restarting=$restarting type=$type package=${attribute?.packageName} japanese=$japanese")
         refreshStrip()
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
             attribute?.packageName == "dev.utmity.titanime.harness") {
@@ -121,6 +188,7 @@ class TitanImeService : InputMethodService() {
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int,
         newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        traceState("selection old=$oldSelStart,$oldSelEnd new=$newSelStart,$newSelEnd composing=$candidatesStart,$candidatesEnd")
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
             currentInputEditorInfo?.packageName == "dev.utmity.titanime.harness") {
             android.util.Log.i("TitanImeProbe", "selection=$oldSelStart,$oldSelEnd->$newSelStart,$newSelEnd composing=$candidatesStart,$candidatesEnd length=${preedit.length}")
@@ -189,8 +257,9 @@ class TitanImeService : InputMethodService() {
     private fun refreshStrip(updateVisibility: Boolean = true) {
         candidateRow?.apply {
             removeAllViews()
+            if (!directField) addView(panelButton("…") { panel = if (panel == "menu") "" else "menu"; renderPanel() })
             addView(TextView(this@TitanImeService).apply {
-                text = if (engine == null) "Mozc unavailable" else if (output.preedit.hasHighlightedPosition()) "変換" else "予測"
+                text = if (engine == null) "Mozc unavailable" else if (!japanese) "英語" else if (output.preedit.hasHighlightedPosition()) "変換" else "予測"
                 setTextColor(android.graphics.Color.DKGRAY)
                 setPadding(12, 12, 12, 12)
             })
@@ -253,10 +322,94 @@ class TitanImeService : InputMethodService() {
             }
         }
         if (updateVisibility) {
-            if (japanese && !directField) {
-                if (!isInputViewShown) requestShowSelf(0)
+            if (!directField) {
+                // The input-view flag can remain true after the IME window was
+                // hidden. It is not evidence that candidates are on screen.
+                if (!isInputViewShown || window?.window?.decorView?.isShown != true) requestShowSelf(0)
             } else if (isInputViewShown) requestHideSelf(0)
         }
+    }
+
+    private fun panelButton(label: String, action: () -> Unit) = TextView(this).apply {
+        text = label; contentDescription = label; textSize = 17f
+        setTextColor(android.graphics.Color.BLACK); setPadding(18, 10, 18, 10)
+        isFocusable = false; setOnClickListener { action() }
+    }
+    private fun openHistory() {
+        if (directField) return
+        panel = "history"; historyQuery = ""; historyIndex = 0; renderPanel(); requestShowSelf(0)
+    }
+    private fun filteredHistory() = history.entries().filter { it.text.contains(historyQuery, ignoreCase = true) }
+    private fun pasteHistory() {
+        if (directField || !history.enabled) return
+        val entry = filteredHistory().getOrNull(historyIndex) ?: return
+        val ic = currentInputConnection ?: return
+        // Pasting is an explicit edit. Finalize the current composition once,
+        // rather than replacing it with a stale native session after the paste.
+        commitComposition(ic)
+        ic.commitText(entry.text, 1)
+        panel = ""; renderPanel()
+    }
+    private fun editorAction(id: Int) {
+        val ic = currentInputConnection ?: return
+        finishForAppKey(ic)
+        if (!ic.performContextMenuAction(id)) android.widget.Toast.makeText(this, "入力先がこの操作に対応していません", android.widget.Toast.LENGTH_SHORT).show()
+        panel = ""; renderPanel()
+    }
+    private fun renderPanel() {
+        val view = supportPanel ?: return
+        view.removeAllViews()
+        if (directField || panel.isEmpty()) return
+        fun item(label: String, action: () -> Unit) { view.addView(panelButton(label, action)) }
+        if (panel == "menu") {
+            item("クリップボード履歴") { openHistory() }
+            item("自動入力（入力先へ要求）") { editorAction(android.R.id.autofill) }
+            item("入力方法を切り替える") { getSystemService(android.view.inputmethod.InputMethodManager::class.java).showInputMethodPicker() }
+            item("Undo") { editorAction(android.R.id.undo) }
+            item("Redo") { editorAction(android.R.id.redo) }
+            item("Titan IME設定") { startActivity(android.content.Intent(this, SettingsActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        } else if (panel == "clear") {
+            item("全履歴を削除する（ピン留めも含む）") { history.clear(); panel = "history"; historyIndex = 0; renderPanel() }
+        } else if (panel == "history") {
+            if (!history.enabled) {
+                item("履歴保存はオフです。設定から有効にできます") { }
+            } else {
+                item("検索：$historyQuery （文字入力／Backspace）") { }
+                val entries = filteredHistory()
+                historyIndex = historyIndex.coerceIn(0, maxOf(0, entries.lastIndex))
+                entries.drop((historyIndex / 4) * 4).take(4).forEach { entry ->
+                    val index = entries.indexOf(entry)
+                    item((if (index == historyIndex) "▶ " else "") + (if (entry.pinned) "★ " else "") + entry.text.take(100).replace('\n', ' ')) {
+                        historyIndex = index; pasteHistory()
+                    }
+                }
+                val row = LinearLayout(this)
+                row.addView(panelButton("ピン切替") { entries.getOrNull(historyIndex)?.let { history.pin(it.text) }; renderPanel() })
+                row.addView(panelButton("削除") { entries.getOrNull(historyIndex)?.let { history.delete(it.text) }; renderPanel() })
+                row.addView(panelButton("全削除…") { panel = "clear"; renderPanel() })
+                view.addView(row)
+                if (entries.isEmpty()) item("履歴なし") { }
+            }
+        }
+        item("閉じる（Esc）") { panel = ""; renderPanel() }
+    }
+
+    private fun handlePanel(event: KeyEvent, fn: Boolean): Boolean {
+        if (panel.isEmpty() || directField) return false
+        if (event.keyCode == KeyEvent.KEYCODE_ESCAPE) { panel = ""; renderPanel(); return true }
+        if (panel != "history") return false
+        val direction = EditingBindings.direction(event, fn, true) ?: event.keyCode
+        when (direction) {
+            KeyEvent.KEYCODE_DPAD_UP -> historyIndex--
+            KeyEvent.KEYCODE_DPAD_DOWN -> historyIndex++
+            KeyEvent.KEYCODE_ENTER -> { pasteHistory(); return true }
+            KeyEvent.KEYCODE_DEL -> { if (historyQuery.isNotEmpty()) historyQuery = historyQuery.dropLast(Character.charCount(historyQuery.codePointBefore(historyQuery.length))); historyIndex = 0 }
+            else -> {
+                if (event.isCtrlPressed || event.isAltPressed || event.isMetaPressed || fn || event.unicodeChar < 32) return false
+                historyQuery += String(Character.toChars(event.unicodeChar)); historyIndex = 0
+            }
+        }
+        renderPanel(); return true
     }
 
     private fun deleteSelectedReading(ic: InputConnection) {
@@ -271,7 +424,10 @@ class TitanImeService : InputMethodService() {
     }
 
     private fun applyOutput(ic: InputConnection, result: Output) {
+        traceRevision++
+        traceState("output consumed=${result.consumed} result=${result.hasResult()} next=${result.preedit.segmentList.sumOf { it.value.length }} window=${result.candidateWindow.candidateCount} all=${result.allCandidateWords.candidatesCount}")
         selectedReading = null
+        writingBatch = true
         ic.beginBatchEdit()
         try {
             if (result.hasResult()) {
@@ -299,14 +455,15 @@ class TitanImeService : InputMethodService() {
                     offset += segment.value.length
                 }
                 ic.setComposingText(styled, 1)
+                traceState("setComposing next=${next.length}")
                 preedit = next
                 output = result
-                // A normalizing editor may have changed both text and its length.
-                // Verify before forcing Mozc's cursor onto that different text.
-                if (!synchronizeEditor(ic)) return
                 if (compositionStart >= 0) {
                     val cursor = next.offsetByCodePoints(0, result.preedit.cursor.coerceIn(0, next.codePointCount(0, next.length)))
-                    ic.setSelection(compositionStart + cursor, compositionStart + cursor)
+                    // Keep text and caret in one batch so an intermediate end
+                    // selection cannot move the Mozc cursor back to the end.
+                    // Do not read a potentially stale editor snapshot here.
+                    if (cursor != next.length) ic.setSelection(compositionStart + cursor, compositionStart + cursor)
                 }
             }
             else {
@@ -316,7 +473,7 @@ class TitanImeService : InputMethodService() {
             }
             preedit = next
             output = result
-        } finally { ic.endBatchEdit() }
+        } finally { ic.endBatchEdit(); writingBatch = false; traceState("endBatch") }
         refreshStrip()
     }
 
@@ -324,13 +481,18 @@ class TitanImeService : InputMethodService() {
      * dropping its composing range. Compare actual text, not just range length.
      * Missing/partial snapshots are unknown, never evidence to erase text. */
     private fun synchronizeEditor(ic: InputConnection): Boolean {
+        // Editors may publish their snapshot only when endBatchEdit completes.
+        // An intermediate snapshot is not evidence of external normalization.
+        if (writingBatch) return true
         if (preedit.isEmpty() || compositionStart < 0) return true
         val snapshot = ic.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0) ?: return true
         val text = snapshot.text ?: return true
         val start = compositionStart - snapshot.startOffset
         val end = start + preedit.length
+        traceState("snapshot length=${text.length} offset=${snapshot.startOffset} selection=${snapshot.selectionStart},${snapshot.selectionEnd} range=$start,$end match=${start >= 0 && end <= text.length && text.subSequence(start, end).toString() == preedit}")
         if (start < 0 || end > text.length) return true
         if (text.subSequence(start, end).toString() == preedit) return true
+        traceState("reset reason=snapshotMismatch finishComposing")
         // Retain the host's authoritative text/selection, discard stale engine
         // candidates, and start the next keystroke as a new composition.
         ic.finishComposingText()
@@ -382,6 +544,7 @@ class TitanImeService : InputMethodService() {
             android.util.Log.i("TitanImeProbe", "key=$keyCode meta=${event.metaState} japanese=$japanese connected=${currentInputConnection != null}")
         }
         val ic = currentInputConnection ?: return super.onKeyDown(keyCode, event)
+        traceState("key kind=${when(keyCode) { KeyEvent.KEYCODE_SPACE -> "space"; KeyEvent.KEYCODE_ENTER -> "enter"; else -> "other" }} japanese=$japanese")
         synchronizeEditor(ic)
         if (preferences.matchesToggle(event, event.isFunctionPressed || event.deviceId in titanFnDevices)) {
             if (event.repeatCount == 0 && engine != null && !directField) {
@@ -397,6 +560,32 @@ class TitanImeService : InputMethodService() {
         if (KeyEvent.isModifierKey(keyCode) || isTitanFn(event) || keyCode == KeyEvent.KEYCODE_SYM ||
             keyCode == KeyEvent.KEYCODE_FUNCTION) return super.onKeyDown(keyCode, event)
         val fnHeld = event.isFunctionPressed || event.deviceId in titanFnDevices
+        if (!directField && fnHeld && !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed && !event.isMetaPressed &&
+            preferences.clipboardKey != "off" && keyCode == (if (preferences.clipboardKey == "b") KeyEvent.KEYCODE_B else KeyEvent.KEYCODE_V)) {
+            if (event.repeatCount == 0) { if (panel == "history") { panel = ""; renderPanel() } else openHistory() }
+            return true
+        }
+        if (handlePanel(event, fnHeld)) return true
+        if (!directField && panel.isEmpty() && fnHeld && preferences.wordDelete && keyCode == KeyEvent.KEYCODE_DEL &&
+            !event.isAltPressed && !event.isMetaPressed && !output.preedit.hasHighlightedPosition()) {
+            finishForAppKey(ic)
+            val ctrl = KeyEvent(event.downTime, event.eventTime, event.action, event.keyCode, event.repeatCount,
+                event.metaState or KeyEvent.META_CTRL_ON)
+            EditingBindings.send(ic, KeyEvent.KEYCODE_DEL, ctrl)
+            return true
+        }
+        val navigation = EditingBindings.direction(event, fnHeld, preferences.editing, preferences.editingLayout)
+        if (navigation != null && !directField && !output.preedit.hasHighlightedPosition()) {
+            if (preedit.isNotEmpty() && !event.isCtrlPressed && !event.isShiftPressed &&
+                navigation in listOf(KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT)) {
+                engine?.key(MozcKey.newBuilder().setSpecialKey(if (navigation == KeyEvent.KEYCODE_DPAD_LEFT)
+                    MozcKey.SpecialKey.LEFT else MozcKey.SpecialKey.RIGHT).build())?.let { applyOutput(ic, it) }
+            } else {
+                if (preedit.isNotEmpty() && (event.isCtrlPressed || navigation in listOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN))) finishForAppKey(ic)
+                EditingBindings.send(ic, navigation, event)
+            }
+            return true
+        }
         val altText = PhysicalKeyboardPolicy.altText(event, fnHeld, preferences.altText)
         if (event.isCtrlPressed || event.isMetaPressed || (event.isAltPressed && altText == null)) {
             if (japanese && !directField) finishForAppKey(ic)

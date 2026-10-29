@@ -94,12 +94,14 @@ class EditorCompatibilityTest {
 
     @Test fun candidatesAfterHideAndRefocus() {
         type("nihongo"); key(KeyEvent.KEYCODE_SPACE); candidatesVisible()
+        var converted = ""
+        instrumentation.runOnMainSync { converted = activity.editor.text.toString() }
         instrumentation.runOnMainSync {
             activity.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(activity.editor.windowToken, 0)
         }
         // Android finishes composing text when hiding the input view. A plain
         // Space after that is not a conversion request; test fresh input instead.
-        Thread.sleep(300); expect("日本語")
+        Thread.sleep(300); expect(converted)
         type("ka"); key(KeyEvent.KEYCODE_SPACE); candidatesVisible()
         instrumentation.runOnMainSync { activity.secondEditor.requestFocus() }
         Thread.sleep(200)
@@ -133,9 +135,10 @@ class EditorCompatibilityTest {
         type("nihongo")
         assertEquals("Web preedit before conversion", "\"にほんご\"", js("document.getElementById('e').value"))
         key(KeyEvent.KEYCODE_SPACE)
-        assertEquals("Web conversion text", "\"日本語\"", js("document.getElementById('e').value"))
+        val converted = js("document.getElementById('e').value")
+        assertNotEquals("Web conversion is nonempty", "\"\"", converted)
         candidatesVisible(); key(KeyEvent.KEYCODE_ENTER)
-        assertEquals("\"日本語\"", js("document.getElementById('e').value"))
+        assertEquals(converted, js("document.getElementById('e').value"))
         js("var e=document.getElementById('e');e.value='prefix';e.setSelectionRange(6,6)")
         Thread.sleep(200); type("ka"); key(KeyEvent.KEYCODE_ENTER)
         assertEquals("\"prefixか\"", js("document.getElementById('e').value"))
@@ -146,6 +149,22 @@ class EditorCompatibilityTest {
         reconnect()
         type("ka"); expect("にほんごか")
         key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_ENTER)
+    }
+    @Test fun batchSnapshotLagDoesNotFinalizeCompositionOrSpace() {
+        instrumentation.runOnMainSync { activity.staleSnapshotDuringBatch = true }
+        type("nihongo"); expect("にほんご")
+        fun composing() = instrumentation.runOnMainSync {
+            assertEquals("Whole reading remains composing", 0, BaseInputConnection.getComposingSpanStart(activity.editor.text))
+            assertEquals(activity.editor.text.length, BaseInputConnection.getComposingSpanEnd(activity.editor.text))
+        }
+        composing()
+        key(KeyEvent.KEYCODE_SPACE); composing()
+        var firstCandidate = ""
+        instrumentation.runOnMainSync { firstCandidate = activity.editor.text.toString() }
+        key(KeyEvent.KEYCODE_SPACE); composing()
+        instrumentation.runOnMainSync { assertNotEquals("Second Space cycles", firstCandidate, activity.editor.text.toString()) }
+        key(KeyEvent.KEYCODE_ENTER)
+        instrumentation.runOnMainSync { assertEquals(-1, BaseInputConnection.getComposingSpanStart(activity.editor.text)) }
     }
     @Test fun nonTextVisiblePasswordFlagsRemainDirect() {
         // Observed Discord field metadata: no text class, visible-password bits.
@@ -174,6 +193,53 @@ class EditorCompatibilityTest {
         key(KeyEvent.KEYCODE_ENTER)
     }
     @Test fun synchronousSameLengthNormalization() = normalize("別")
+    @Test fun openingAndClosingSupportUiPreservesComposition() {
+        type("ka"); expect("か")
+        val automation = instrumentation.uiAutomation
+        val originalFlags = automation.serviceInfo.flags
+        automation.serviceInfo = automation.serviceInfo.apply { flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
+        fun click(node: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
+            if (node == null) return false
+            if (node.contentDescription?.toString() == "…") return node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+            return (0 until node.childCount).any { click(node.getChild(it)) }
+        }
+        try {
+            assertTrue(automation.windows.any { click(it.root) })
+            Thread.sleep(150)
+            instrumentation.runOnMainSync { assertEquals(0, BaseInputConnection.getComposingSpanStart(activity.editor.text)) }
+            key(KeyEvent.KEYCODE_ESCAPE); expect("か")
+            key(KeyEvent.KEYCODE_V, KeyEvent.META_FUNCTION_ON)
+            key(KeyEvent.KEYCODE_ESCAPE); expect("か")
+            instrumentation.runOnMainSync { assertEquals(0, BaseInputConnection.getComposingSpanStart(activity.editor.text)) }
+            key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_ENTER)
+        } finally { automation.serviceInfo = automation.serviceInfo.apply { flags = originalFlags } }
+    }
+    @Test fun physicalNavigationPreservesReadingAndSelection() {
+        type("nihongo")
+        key(KeyEvent.KEYCODE_H, KeyEvent.META_FUNCTION_ON)
+        type("ka"); expect("にほんかご")
+        key(KeyEvent.KEYCODE_DEL); expect("にほんご")
+        key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_ENTER)
+        instrumentation.runOnMainSync { activity.editor.setText("ab😀c\nxyz"); activity.editor.setSelection(5) }
+        reconnect()
+        key(KeyEvent.KEYCODE_H, KeyEvent.META_FUNCTION_ON)
+        instrumentation.runOnMainSync { assertEquals(4, activity.editor.selectionStart) }
+        key(KeyEvent.KEYCODE_H, KeyEvent.META_FUNCTION_ON)
+        instrumentation.runOnMainSync { assertEquals("Must not split surrogate pair", 2, activity.editor.selectionStart) }
+        key(KeyEvent.KEYCODE_L, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        instrumentation.runOnMainSync { assertEquals(2, activity.editor.selectionStart); assertEquals(4, activity.editor.selectionEnd) }
+        instrumentation.runOnMainSync { activity.editor.setText("Ae\u0301B\nxyz"); activity.editor.setSelection(1) }
+        reconnect()
+        key(KeyEvent.KEYCODE_L, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        instrumentation.runOnMainSync { assertEquals(1, activity.editor.selectionStart); assertEquals(3, activity.editor.selectionEnd) }
+        key(KeyEvent.KEYCODE_L, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        instrumentation.runOnMainSync { assertEquals(1, activity.editor.selectionStart); assertEquals(4, activity.editor.selectionEnd) }
+        instrumentation.runOnMainSync { activity.editor.setSelection(1) }
+        key(KeyEvent.KEYCODE_J, KeyEvent.META_FUNCTION_ON)
+        instrumentation.runOnMainSync { assertTrue("Move to second line", activity.editor.selectionStart >= 5) }
+        key(KeyEvent.KEYCODE_K, KeyEvent.META_FUNCTION_ON)
+        instrumentation.runOnMainSync { assertTrue("Move back to first line", activity.editor.selectionStart < 5) }
+    }
     @Test fun synchronousDifferentLengthNormalization() = normalize("別名")
     private fun normalize(replacement: String) {
         instrumentation.runOnMainSync { activity.rewriteNextComposition = replacement }

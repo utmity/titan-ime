@@ -1,5 +1,28 @@
 # Titan IME
 
+## 編集・入力支援
+
+| 操作 | 初期割り当て・利用方法 |
+| --- | --- |
+| 通常のカーソル移動 | Fn+H/L/K/J：左/右/上/下（設定でWASD配置または無効化） |
+| 範囲選択 | Shift+Fn+方向相当。左右は文字境界と選択アンカーを保持 |
+| 単語移動 | Ctrl+Fn+H/L（入力先の対応に依存） |
+| 単語削除 | 設定でFn+Backspaceを有効化（標準オフ） |
+| 変換中の文節操作 | 既存のFn+H/L、Fn+U/Oを優先 |
+| 履歴パネル | Fn+V（設定でFn+B/無効化）、または候補バーの「…」 |
+| 履歴の検索・貼り付け | 文字入力で検索、Fn+J/Kで選択、Enterまたはタップで貼り付け、Escで閉じる |
+| 履歴保存 | 設定から有効化。標準オフ、10/20/50件、ピン留め・個別削除・全削除 |
+| Undo / Redo | 「…」から入力先へ標準操作を要求。Ctrl+Z等は従来どおりアプリへ転送 |
+| 自動入力 | 「…」から入力先へ要求、設定からAndroidのサービス選択画面へ移動 |
+| 別IMEへの切り替え | 「…」または設定の「入力方法を切り替える」 |
+
+未確定中の左右移動は読みを編集します。上下・単語移動と履歴の貼り付けは
+未確定文字列を確定してから実行します。メニューを開閉するだけでは確定しません。
+パスワード・直接入力欄のバイパスは維持します。インライン自動入力は通常欄向けの
+API連携を実装していますが、Google/Bitwarden実機連携とパスワード欄の表示は未対応・未検証です。
+操作の制約・履歴の保存対象は[編集支援の仕様](docs/editing-support.md)を参照してください。
+ChatGPTの細切れ確定とSpace連続変換は[実機の状態遷移と修正](docs/batch-editor-synchronization.md)に記録しています。
+
 Physical-keyboard-first Android IME for Unihertz Titan 2 Elite, with on-device Mozc kana-kanji conversion.
 
 ## Priorities and architecture

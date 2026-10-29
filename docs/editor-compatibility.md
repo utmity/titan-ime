@@ -33,8 +33,11 @@ session/candidates and starts subsequent input afresh. A missing or partial
 snapshot is not treated as proof of a mismatch. This is preservation/recovery,
 not bypassing an editor's validation or guaranteeing kana conversion through an
 editor that normalizes every individual composing update.
-The comparison also happens after setComposingText and before applying Mozc's
-cursor, so length-changing normalization keeps the host's resulting cursor.
+The comparison must not run inside the composing write batch: some editors
+still expose the previous snapshot there. Text and middle-reading cursor updates
+remain in one batch; subsequent callbacks/operations validate the host state.
+See [batch synchronization](batch-editor-synchronization.md) for the ChatGPT trace
+and the regression that exposed this distinction.
 
 Ordinary asynchronous setText and restartInput cases passed before this change;
 no speculative restartInput rewrite was added. These simulations do not establish
