@@ -1,0 +1,659 @@
+package dev.utmity.titanime
+
+import android.content.Intent
+import android.provider.Settings
+import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Test
+import org.junit.Assert.assertEquals
+import android.view.KeyEvent
+import android.view.inputmethod.BaseInputConnection
+
+/** Injected Android events exercise the selected IME; they do not prove physical key mappings. */
+class InputDeviceTest {
+    private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    @Test fun testInputSequence() {
+        val context = instrumentation.targetContext
+        assertEquals("Select Titan IME manually before running this test",
+            "dev.utmity.titanime/.TitanImeService",
+            Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD))
+        val initialJapanese = java.util.concurrent.atomic.AtomicBoolean()
+        val connected = java.util.concurrent.atomic.AtomicInteger()
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: android.content.Context?, intent: Intent?) { initialJapanese.set(intent?.getBooleanExtra("japanese", false) == true); connected.incrementAndGet() }
+        }
+        val filter = android.content.IntentFilter("dev.utmity.titanime.INPUT_READY")
+        androidx.core.content.ContextCompat.registerReceiver(
+            context, receiver, filter, androidx.core.content.ContextCompat.RECEIVER_EXPORTED)
+        val activity = instrumentation.startActivitySync(Intent(context, InputTestActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as InputTestActivity
+        var targetEditor = activity.editor
+        try {
+            instrumentation.waitForIdleSync()
+            var restarted = false
+            var ready = false
+            val deadline = android.os.SystemClock.uptimeMillis() + 10000
+            while (!ready && android.os.SystemClock.uptimeMillis() < deadline) {
+                instrumentation.runOnMainSync {
+                    if (activity.editor.hasWindowFocus()) {
+                        if (!restarted) {
+                            activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java).restartInput(activity.editor)
+                            restarted = true
+                        }
+                        activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                            .showSoftInput(activity.editor, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                        ready = connected.get() > 0
+                    }
+                }
+                Thread.sleep(100)
+            }
+            org.junit.Assert.assertTrue("Input connection not ready for the focused test editor", ready)
+            Thread.sleep(1000)
+            fun requireTestFocus() {
+                instrumentation.runOnMainSync {
+                    org.junit.Assert.assertTrue("Test editor lost focus; abort input injection",
+                        activity.hasWindowFocus() && targetEditor.hasFocus())
+                }
+            }
+            fun key(code: Int, meta: Int = 0) {
+                requireTestFocus()
+                assertEquals("IME changed; abort input injection", "dev.utmity.titanime/.TitanImeService",
+                    Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD))
+                instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, code, 0, meta))
+                instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_UP, code, 0, meta))
+                instrumentation.waitForIdleSync()
+                Thread.sleep(100)
+                requireTestFocus()
+                assertEquals("IME changed after key $code", "dev.utmity.titanime/.TitanImeService",
+                    Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD))
+            }
+            fun expect(text: String, composing: Boolean) {
+                instrumentation.runOnMainSync {
+                    assertEquals(text, targetEditor.text.toString())
+                    assertEquals("Composing span for '$text'", composing, BaseInputConnection.getComposingSpanStart(targetEditor.text) >= 0)
+                }
+            }
+            fun vendorFn(action: Int) {
+                requireTestFocus()
+                instrumentation.sendKeySync(KeyEvent(0, 0, action, 403, 0, 0, 0, 251))
+                instrumentation.waitForIdleSync()
+                Thread.sleep(100)
+            }
+            fun toggle() {
+                vendorFn(KeyEvent.ACTION_DOWN)
+                try { key(KeyEvent.KEYCODE_SPACE) } finally { vendorFn(KeyEvent.ACTION_UP) }
+            }
+            fun chooseSetting(label: String) {
+                context.startActivity(Intent().setClassName("dev.utmity.titanime", "dev.utmity.titanime.SettingsActivity")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+                val deadline = android.os.SystemClock.uptimeMillis() + 10000
+                var selected = false
+                while (!selected && android.os.SystemClock.uptimeMillis() < deadline) {
+                    val root = instrumentation.uiAutomation.rootInActiveWindow
+                    val section = if (label.contains("学習")) "辞書・学習・履歴" else if (label.contains("予測") || label.contains("訂正")) "入力・変換" else "物理キー"
+                    root?.findAccessibilityNodeInfosByText("＋ $section")?.firstOrNull { it.text?.toString() == "＋ $section" }
+                        ?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                    val node = instrumentation.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(label)?.firstOrNull { it.text?.toString() == label }
+                    if (node != null) selected = node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                    if (!selected) Thread.sleep(100)
+                }
+                org.junit.Assert.assertTrue("Settings control available: $label", selected)
+                Thread.sleep(200)
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+                instrumentation.waitForIdleSync()
+                Thread.sleep(400)
+                requireTestFocus()
+            }
+            chooseSetting("変換学習オフ")
+            if (initialJapanese.get()) toggle()
+            for ((code, symbol) in listOf(KeyEvent.KEYCODE_MINUS to "-", KeyEvent.KEYCODE_COMMA to ",",
+                KeyEvent.KEYCODE_PERIOD to ".", KeyEvent.KEYCODE_LEFT_BRACKET to "[", KeyEvent.KEYCODE_RIGHT_BRACKET to "]",
+                KeyEvent.KEYCODE_APOSTROPHE to "'")) {
+                key(code); expect(symbol, false)
+                key(KeyEvent.KEYCODE_DEL); expect("", false)
+            }
+            // The retired three-key chord must no longer switch the IME mode.
+            key(KeyEvent.KEYCODE_J, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
+            key(KeyEvent.KEYCODE_A); expect("a", false)
+            key(KeyEvent.KEYCODE_DEL); expect("", false)
+            toggle()
+            key(KeyEvent.KEYCODE_K); expect("k", true)
+            key(KeyEvent.KEYCODE_DEL); expect("", false)
+            key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A); expect("か", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("か", false)
+            key(KeyEvent.KEYCODE_ENTER); expect("か\n", false)
+            key(KeyEvent.KEYCODE_N); expect("か\nn", true)
+            toggle(); expect("か\nん", false)
+            key(KeyEvent.KEYCODE_B); expect("か\nんb", false)
+            toggle()
+            // Synthetic regression using the modifier observed on physical Sym+A.
+            key(KeyEvent.KEYCODE_A, KeyEvent.META_SYM_ON); expect("か\nんba", false)
+            // Reproduce Titan's vendor Fn down/A/up sequence; this is not a physical press.
+            vendorFn(KeyEvent.ACTION_DOWN)
+            try {
+                key(KeyEvent.KEYCODE_A); expect("か\nんbaa", false)
+            } finally {
+                vendorFn(KeyEvent.ACTION_UP)
+            }
+            key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A); expect("か\nんbaaか", true)
+            toggle()
+            expect("か\nんbaaか", false)
+            toggle()
+            key(KeyEvent.KEYCODE_N)
+            key(KeyEvent.KEYCODE_A, KeyEvent.META_SYM_ON); expect("か\nんbaaかんa", false)
+            key(KeyEvent.KEYCODE_K)
+            vendorFn(KeyEvent.ACTION_DOWN)
+            try {
+                key(KeyEvent.KEYCODE_A); expect("か\nんbaaかんaka", false)
+            } finally {
+                vendorFn(KeyEvent.ACTION_UP)
+            }
+            key(KeyEvent.KEYCODE_A, KeyEvent.META_FUNCTION_ON); expect("か\nんbaaかんakaa", false)
+            key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A); expect("か\nんbaaかんakaaか", true)
+            toggle()
+            expect("か\nんbaaかんakaaか", false)
+            toggle()
+            var expected = "か\nんbaaかんakaaか"
+            for ((code, symbol) in listOf(KeyEvent.KEYCODE_PERIOD to "。", KeyEvent.KEYCODE_COMMA to "、", KeyEvent.KEYCODE_MINUS to "ー", KeyEvent.KEYCODE_LEFT_BRACKET to "「", KeyEvent.KEYCODE_RIGHT_BRACKET to "」", KeyEvent.KEYCODE_1 to "1")) {
+                key(KeyEvent.KEYCODE_N)
+                key(code)
+                expected += "ん$symbol"
+                expect(expected, code != KeyEvent.KEYCODE_1)
+                key(KeyEvent.KEYCODE_K); key(KeyEvent.KEYCODE_A)
+                expected += "か"
+                expect(expected, true)
+                key(KeyEvent.KEYCODE_ENTER)
+                expect(expected, false)
+                key(KeyEvent.KEYCODE_ENTER)
+                expected += "\n"
+                expect(expected, false)
+            }
+            // Mozc conversion: physical-key equivalent injection into the real InputConnection.
+            fun clearEditor(prefix: String = "") {
+                val before = connected.get()
+                instrumentation.runOnMainSync {
+                    activity.editor.setText(prefix)
+                    activity.editor.setSelection(prefix.length)
+                    activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                        .restartInput(activity.editor)
+                }
+                val timeout = android.os.SystemClock.uptimeMillis() + 10000
+                while (connected.get() == before && android.os.SystemClock.uptimeMillis() < timeout) Thread.sleep(50)
+                org.junit.Assert.assertTrue("Input must reconnect after clearing editor", connected.get() > before)
+                instrumentation.waitForIdleSync()
+            }
+            fun type(text: String) { text.forEach { key(KeyEvent.KEYCODE_A + (it - 'a')) } }
+            // Exercise editor shortcuts through the IME without retaining or logging
+            // the user's clipboard. Restore the exact original ClipData in finally.
+            val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+            var savedClip: android.content.ClipData? = null
+            instrumentation.runOnMainSync { savedClip = clipboard.primaryClip }
+            try {
+                fun select(start: Int, end: Int) {
+                    instrumentation.runOnMainSync { activity.editor.setSelection(start, end) }
+                    instrumentation.waitForIdleSync(); Thread.sleep(150)
+                }
+                clearEditor(); type("nihongo"); expect("にほんご", true)
+                select(1, 3)
+                key(KeyEvent.KEYCODE_C, KeyEvent.META_CTRL_ON)
+                expect("にほんご", false)
+                instrumentation.runOnMainSync {
+                    assertEquals("ほん", clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+                    assertEquals(1, activity.editor.selectionStart)
+                    assertEquals(3, activity.editor.selectionEnd)
+                }
+                select(4, 4); key(KeyEvent.KEYCODE_V, KeyEvent.META_CTRL_ON)
+                expect("にほんごほん", false)
+
+                clearEditor(); type("nihongo"); select(1, 3)
+                key(KeyEvent.KEYCODE_X, KeyEvent.META_CTRL_ON); expect("にご", false)
+                key(KeyEvent.KEYCODE_V, KeyEvent.META_CTRL_ON); expect("にほんご", false)
+                type("ka"); expect("にほんかご", true)
+                key(KeyEvent.KEYCODE_ENTER); expect("にほんかご", false)
+
+                clearEditor(); type("nihongo")
+                key(KeyEvent.KEYCODE_A, KeyEvent.META_CTRL_ON)
+                key(KeyEvent.KEYCODE_X, KeyEvent.META_CTRL_ON); expect("", false)
+                key(KeyEvent.KEYCODE_V, KeyEvent.META_CTRL_ON); expect("にほんご", false)
+                // English shortcuts still belong to EditText.
+                toggle(); clearEditor(); type("abc")
+                key(KeyEvent.KEYCODE_A, KeyEvent.META_CTRL_ON)
+                key(KeyEvent.KEYCODE_C, KeyEvent.META_CTRL_ON)
+                select(3, 3); key(KeyEvent.KEYCODE_V, KeyEvent.META_CTRL_ON)
+                expect("abcabc", false); toggle()
+            } finally {
+                instrumentation.runOnMainSync {
+                    savedClip?.let { clipboard.setPrimaryClip(it) } ?: clipboard.clearPrimaryClip()
+                }
+            }
+            // A held physical modifier/chord must not receive a synthetic early Up.
+            clearEditor(); type("ka"); expect("か", true)
+            instrumentation.runOnMainSync { activity.receivedKeys.clear() }
+            val ctrl = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
+            instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_CTRL_LEFT, 0, ctrl))
+            instrumentation.waitForIdleSync(); Thread.sleep(100)
+            expect("か", true)
+            instrumentation.runOnMainSync {
+                assertEquals(0, activity.receivedKeys.count { it.keyCode == KeyEvent.KEYCODE_CTRL_LEFT && it.action == KeyEvent.ACTION_UP })
+            }
+            instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_R, 0, ctrl))
+            instrumentation.waitForIdleSync(); Thread.sleep(100)
+            expect("か", false)
+            instrumentation.runOnMainSync {
+                assertEquals(0, activity.receivedKeys.count { it.keyCode == KeyEvent.KEYCODE_R && it.action == KeyEvent.ACTION_UP })
+            }
+            instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_R, 0, ctrl))
+            instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_CTRL_LEFT, 0, 0))
+            instrumentation.waitForIdleSync(); Thread.sleep(100)
+            instrumentation.runOnMainSync {
+                for (code in listOf(KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_R)) {
+                    assertEquals(1, activity.receivedKeys.count { it.keyCode == code && it.action == KeyEvent.ACTION_DOWN })
+                    assertEquals(1, activity.receivedKeys.count { it.keyCode == code && it.action == KeyEvent.ACTION_UP })
+                }
+            }
+            clearEditor()
+            // Releasing Ctrl while a letter remains held changes repeat routing.
+            // If an app received any Down, it must still receive the final Up.
+            instrumentation.runOnMainSync { activity.receivedKeys.clear() }
+            val heldAt = android.os.SystemClock.uptimeMillis()
+            instrumentation.sendKeySync(KeyEvent(heldAt, heldAt, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_R, 0, ctrl))
+            instrumentation.sendKeySync(KeyEvent(heldAt, heldAt + 100, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_R, 1, 0))
+            instrumentation.sendKeySync(KeyEvent(heldAt, heldAt + 200, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_R, 0, 0))
+            instrumentation.waitForIdleSync(); Thread.sleep(150)
+            instrumentation.runOnMainSync {
+                assertEquals("Final Up after a passed shortcut Down", 1,
+                    activity.receivedKeys.count { it.keyCode == KeyEvent.KEYCODE_R && it.action == KeyEvent.ACTION_UP })
+            }
+            clearEditor()
+            // Reverse direction: a Japanese letter was consumed before Ctrl was
+            // pressed during auto-repeat. The repeat forwarded to the app owns Up.
+            instrumentation.runOnMainSync { activity.receivedKeys.clear() }
+            val reverseHeldAt = android.os.SystemClock.uptimeMillis()
+            instrumentation.sendKeySync(KeyEvent(reverseHeldAt, reverseHeldAt, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_R, 0, 0))
+            instrumentation.sendKeySync(KeyEvent(reverseHeldAt, reverseHeldAt + 100, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_R, 1, ctrl))
+            instrumentation.sendKeySync(KeyEvent(reverseHeldAt, reverseHeldAt + 200, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_R, 0, ctrl))
+            instrumentation.waitForIdleSync(); Thread.sleep(150)
+            instrumentation.runOnMainSync {
+                assertEquals("Forwarded repeat Down", 1,
+                    activity.receivedKeys.count { it.keyCode == KeyEvent.KEYCODE_R && it.action == KeyEvent.ACTION_DOWN })
+                assertEquals("Final Up after forwarded repeat", 1,
+                    activity.receivedKeys.count { it.keyCode == KeyEvent.KEYCODE_R && it.action == KeyEvent.ACTION_UP })
+            }
+            clearEditor()
+            // A modifier press alone must not commit before its punctuation arrives.
+            type("ka")
+            vendorFn(KeyEvent.ACTION_DOWN)
+            try {
+                expect("か", true)
+                key(KeyEvent.KEYCODE_MINUS); expect("かー", true)
+            } finally { vendorFn(KeyEvent.ACTION_UP) }
+            key(KeyEvent.KEYCODE_ENTER); expect("かー", false)
+            clearEditor()
+            type("ka")
+            key(KeyEvent.KEYCODE_SYM, KeyEvent.META_SYM_ON); expect("か", true)
+            key(KeyEvent.KEYCODE_COMMA, KeyEvent.META_SYM_ON); expect("か、", true)
+            key(KeyEvent.KEYCODE_PERIOD, KeyEvent.META_FUNCTION_ON); expect("か、。", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("か、。", false)
+            clearEditor()
+            type("ka")
+            key(KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.META_ALT_ON); expect("か", true)
+            // Instrumentation replaces deviceId with virtual keyboard; validate the
+            // device's map separately and inject its resolved punctuation with Alt.
+            val deviceMap = android.view.KeyCharacterMap.load(0)
+            for ((physical, punctuation, expected) in listOf(
+                Triple(KeyEvent.KEYCODE_I, KeyEvent.KEYCODE_MINUS, "かー"),
+                Triple(KeyEvent.KEYCODE_N, KeyEvent.KEYCODE_COMMA, "かー、"),
+                Triple(KeyEvent.KEYCODE_M, KeyEvent.KEYCODE_PERIOD, "かー、。"))) {
+                val symbol = when (punctuation) { KeyEvent.KEYCODE_MINUS -> '-'; KeyEvent.KEYCODE_COMMA -> ','; else -> '.' }
+                assertEquals("Titan's physical Alt map", symbol.code, deviceMap.get(physical, KeyEvent.META_ALT_ON))
+                key(punctuation)
+                expect(expected, true)
+            }
+            key(KeyEvent.KEYCODE_ENTER); expect("かー、。", false)
+            clearEditor()
+            fun tapEditorOffset(offset: Int, longPress: Boolean = false) {
+                val location = IntArray(2)
+                var x = 0f; var y = 0f
+                instrumentation.runOnMainSync {
+                    targetEditor.getLocationOnScreen(location)
+                    val layout = targetEditor.layout
+                    val line = layout.getLineForOffset(offset)
+                    x = location[0] + targetEditor.totalPaddingLeft - targetEditor.scrollX + layout.getPrimaryHorizontal(offset)
+                    y = (location[1] + targetEditor.totalPaddingTop - targetEditor.scrollY +
+                        (layout.getLineTop(line) + layout.getLineBottom(line)) / 2).toFloat()
+                }
+                requireTestFocus()
+                val time = android.os.SystemClock.uptimeMillis()
+                for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                    val event = android.view.MotionEvent.obtain(time, android.os.SystemClock.uptimeMillis(), action, x, y, 0)
+                    event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                    org.junit.Assert.assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true))
+                    event.recycle()
+                    if (longPress && action == android.view.MotionEvent.ACTION_DOWN) Thread.sleep(800)
+                }
+                instrumentation.waitForIdleSync(); Thread.sleep(200)
+            }
+            type("nihongo"); expect("にほんご", true)
+            tapEditorOffset(3)
+            instrumentation.waitForIdleSync(); Thread.sleep(150)
+            expect("にほんご", true)
+            type("ka"); expect("にほんかご", true)
+            key(KeyEvent.KEYCODE_DEL); expect("にほんご", true)
+            key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("日本語", false)
+            clearEditor()
+            clearEditor("😀")
+            type("nihongo"); tapEditorOffset(5)
+            expect("😀にほんご", true)
+            type("ka"); expect("😀にほんかご", true)
+            key(KeyEvent.KEYCODE_DEL); expect("😀にほんご", true)
+            key(KeyEvent.KEYCODE_SPACE); expect("😀日本語", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("😀日本語", false)
+            clearEditor()
+            type("a"); key(KeyEvent.KEYCODE_ENTER)
+            type("nihongo")
+            instrumentation.runOnMainSync { activity.editor.setSelection(0) }
+            instrumentation.waitForIdleSync(); Thread.sleep(150)
+            expect("あにほんご", false)
+            type("ka"); expect("かあにほんご", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("かあにほんご", false)
+            clearEditor()
+            type("nihongo"); expect("にほんご", true)
+            key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
+            key(KeyEvent.KEYCODE_SPACE)
+            var alternate = ""
+            instrumentation.runOnMainSync { alternate = activity.editor.text.toString() }
+            org.junit.Assert.assertNotEquals("Space must select another candidate", "日本語", alternate)
+            org.junit.Assert.assertTrue("Candidate must not be empty", alternate.isNotEmpty())
+            expect(alternate, true)
+            key(KeyEvent.KEYCODE_ENTER); expect(alternate, false)
+            key(KeyEvent.KEYCODE_ENTER); expect("$alternate\n", false)
+            clearEditor()
+            type("nihongo"); key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_SPACE)
+            fun tapImeText(label: String) {
+                val automation = instrumentation.uiAutomation
+                val oldFlags = automation.serviceInfo.flags
+                automation.serviceInfo = automation.serviceInfo.apply {
+                    flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+                }
+                try {
+                    var candidate: android.view.accessibility.AccessibilityNodeInfo? = null
+                    val timeout = android.os.SystemClock.uptimeMillis() + 5000
+                    while (candidate == null && android.os.SystemClock.uptimeMillis() < timeout) {
+                        for (window in automation.windows) {
+                            val root = window.root ?: continue
+                            if (root.packageName?.toString() != "dev.utmity.titanime") continue
+                            candidate = root.findAccessibilityNodeInfosByText(label).firstOrNull {
+                                it.text?.toString() == label && it.isClickable && it.isVisibleToUser
+                            }
+                            if (candidate != null) break
+                        }
+                        if (candidate == null) Thread.sleep(100)
+                    }
+                    org.junit.Assert.assertNotNull("Visible, clickable Japanese candidate required", candidate)
+                    val bounds = android.graphics.Rect()
+                    candidate!!.getBoundsInScreen(bounds)
+                    val screen = context.resources.displayMetrics
+                    org.junit.Assert.assertTrue("Candidate must be within screen", !bounds.isEmpty &&
+                        bounds.left >= 0 && bounds.top >= 0 && bounds.right <= screen.widthPixels &&
+                        bounds.bottom <= screen.heightPixels)
+                    requireTestFocus()
+                    val now = android.os.SystemClock.uptimeMillis()
+                    for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                        val touch = android.view.MotionEvent.obtain(now, android.os.SystemClock.uptimeMillis(),
+                            action, bounds.exactCenterX(), bounds.exactCenterY(), 0)
+                        touch.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                        org.junit.Assert.assertTrue("Candidate touch injection", automation.injectInputEvent(touch, true))
+                        touch.recycle()
+                    }
+                    instrumentation.waitForIdleSync()
+                    Thread.sleep(100)
+                } finally {
+                    automation.serviceInfo = automation.serviceInfo.apply { flags = oldFlags }
+                }
+            }
+            tapImeText("日本語")
+            expect("日本語", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("日本語", false)
+            clearEditor()
+            chooseSetting("予測変換オン")
+            chooseSetting("訂正候補オン")
+            type("nihongo"); expect("にほんご", true)
+            tapImeText("日本語"); expect("日本語", false)
+            type("ka"); expect("日本語か", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("日本語か", false)
+            clearEditor(); type("fuinki"); expect("ふいんき", true)
+            tapImeText("雰囲気（訂正）"); expect("雰囲気", false)
+            clearEditor(); type("fuinki"); expect("ふいんき", true)
+            tapImeText("…"); tapImeText("そのまま：ふいんき"); expect("ふいんき", false)
+            clearEditor(); type("katukou"); expect("かつこう", true)
+            tapImeText("学校"); expect("学校", false)
+            type("ka"); expect("学校か", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("学校か", false)
+            clearEditor(); type("hiyouin"); expect("ひよういn", true)
+            tapImeText("病院"); expect("病院", false)
+            clearEditor(); type("katukou"); expect("かつこう", true)
+            tapImeText("…"); tapImeText("そのまま：かつこう"); expect("かつこう", false)
+            chooseSetting("予測変換オフ")
+            clearEditor(); type("nihongo"); expect("にほんご", true)
+            key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("日本語", false)
+            chooseSetting("予測変換オン")
+            clearEditor()
+            type("nihongo"); key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
+            tapImeText("…"); tapImeText("読みに戻す"); expect("にほんご", true)
+            key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
+            key(KeyEvent.KEYCODE_ESCAPE); expect("にほんご", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("にほんご", false)
+            // Former custom-composer regressions now exercise Mozc itself on Android.
+            for ((roman, kana) in mapOf("konnichiha" to "こんにちは", "kitte" to "きって", "nna" to "んな", "kanna" to "かんな")) {
+                clearEditor(); type(roman); expect(kana, true)
+                key(KeyEvent.KEYCODE_ENTER); expect(kana, false)
+            }
+            clearEditor()
+            type("nihongo"); expect("にほんご", true)
+            instrumentation.runOnMainSync { activity.editor.setSelection(0) }
+            instrumentation.waitForIdleSync()
+            Thread.sleep(150)
+            type("ka"); expect("かにほんご", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("かにほんご", false)
+
+            clearEditor()
+            // External ranges must replace only the selection, in reading and conversion.
+            for (convert in listOf(false, true)) {
+                type("nihongo")
+                if (convert) key(KeyEvent.KEYCODE_SPACE)
+                instrumentation.runOnMainSync { activity.editor.setSelection(0, 2) }
+                instrumentation.waitForIdleSync()
+                Thread.sleep(150)
+                type("ka")
+                val replacement = if (convert) "か語" else "かんご"
+                expect(replacement, true)
+                key(KeyEvent.KEYCODE_ENTER); expect(replacement, false)
+                clearEditor()
+            }
+            // Range selection within reading retains the whole composing span.
+            fun selectReading(start: Int, end: Int) {
+                instrumentation.runOnMainSync { activity.editor.setSelection(start, end) }
+                instrumentation.waitForIdleSync(); Thread.sleep(150)
+            }
+            for (reverse in listOf(false, true)) {
+                clearEditor("😀")
+                type("nihongo")
+                selectReading(if (reverse) 5 else 3, if (reverse) 3 else 5)
+                expect("😀にほんご", true)
+                type("ka"); expect("😀にかご", true)
+                instrumentation.runOnMainSync {
+                    assertEquals(2, BaseInputConnection.getComposingSpanStart(activity.editor.text))
+                    assertEquals(5, BaseInputConnection.getComposingSpanEnd(activity.editor.text))
+                }
+                key(KeyEvent.KEYCODE_SPACE)
+                instrumentation.runOnMainSync { org.junit.Assert.assertTrue(BaseInputConnection.getComposingSpanStart(activity.editor.text) >= 0) }
+                key(KeyEvent.KEYCODE_ENTER)
+            }
+            clearEditor(); type("nihongo")
+            selectReading(1, 3); expect("にほんご", true)
+            key(KeyEvent.KEYCODE_DEL); expect("にご", true)
+            selectReading(0, 2)
+            key(KeyEvent.KEYCODE_FORWARD_DEL); expect("", false)
+            type("ka"); expect("か", true)
+            key(KeyEvent.KEYCODE_ENTER)
+            clearEditor(); type("nihongo")
+            selectReading(1, 3)
+            key(KeyEvent.KEYCODE_DPAD_LEFT)
+            type("ka"); expect("にかほんご", true)
+            key(KeyEvent.KEYCODE_ENTER)
+            clearEditor()
+            clearEditor(); type("kya")
+            selectReading(1, 2); expect("きゃ", true)
+            type("ku"); expect("きく", true)
+            key(KeyEvent.KEYCODE_ENTER)
+            clearEditor(); type("nihongo")
+            selectReading(1, 3)
+            key(KeyEvent.KEYCODE_MINUS); expect("にーご", true)
+            key(KeyEvent.KEYCODE_ENTER)
+            clearEditor()
+            type("nihongo")
+            tapEditorOffset(2, longPress = true)
+            expect("にほんご", true)
+            var replacedByLongPress = ""
+            instrumentation.runOnMainSync {
+                val start = minOf(activity.editor.selectionStart, activity.editor.selectionEnd)
+                val end = maxOf(activity.editor.selectionStart, activity.editor.selectionEnd)
+                org.junit.Assert.assertTrue("Long press selects a nonempty range", start >= 0 && end > start && end <= 4)
+                replacedByLongPress = "にほんご".replaceRange(start, end, "か")
+            }
+            type("ka"); expect(replacedByLongPress, true)
+            key(KeyEvent.KEYCODE_ENTER)
+            clearEditor()
+            // Before conversion, arrows move the Mozc cursor without committing.
+            type("kana")
+            key(KeyEvent.KEYCODE_DPAD_LEFT); expect("かな", true)
+            type("ki"); expect("かきな", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("かきな", false)
+            clearEditor()
+            type("ka")
+            key(KeyEvent.KEYCODE_DPAD_LEFT); expect("か", true)
+            type("ki"); expect("きか", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("きか", false)
+            clearEditor()
+            type("nihongowobenkyousuru")
+            key(KeyEvent.KEYCODE_SPACE)
+            fun highlightedRange(): Pair<Int, Int> {
+                var range = -1 to -1
+                instrumentation.runOnMainSync {
+                    val text = targetEditor.text
+                    val spans = text.getSpans(0, text.length, android.text.style.StyleSpan::class.java)
+                    org.junit.Assert.assertEquals("Exactly one focused Mozc segment", 1, spans.size)
+                    range = text.getSpanStart(spans[0]) to text.getSpanEnd(spans[0])
+                }
+                return range
+            }
+            val firstSegment = highlightedRange()
+            vendorFn(KeyEvent.ACTION_DOWN)
+            try {
+                key(KeyEvent.KEYCODE_L)
+                org.junit.Assert.assertTrue(highlightedRange().first > firstSegment.first)
+                key(KeyEvent.KEYCODE_H)
+                assertEquals(firstSegment, highlightedRange())
+                key(KeyEvent.KEYCODE_O)
+                org.junit.Assert.assertNotEquals(firstSegment, highlightedRange())
+                key(KeyEvent.KEYCODE_U)
+                assertEquals(firstSegment, highlightedRange())
+            } finally { vendorFn(KeyEvent.ACTION_UP) }
+
+            key(KeyEvent.KEYCODE_DPAD_RIGHT)
+            val secondSegment = highlightedRange()
+            key(KeyEvent.KEYCODE_DPAD_LEFT)
+            tapEditorOffset(secondSegment.first)
+            assertEquals("Tapping conversion selects a segment without discarding it", secondSegment, highlightedRange())
+            org.junit.Assert.assertTrue("Right must focus a later segment", secondSegment.first > firstSegment.first)
+            key(KeyEvent.KEYCODE_DPAD_LEFT)
+            assertEquals(firstSegment, highlightedRange())
+            key(KeyEvent.KEYCODE_L, KeyEvent.META_FUNCTION_ON)
+            assertEquals(secondSegment, highlightedRange())
+            key(KeyEvent.KEYCODE_H, KeyEvent.META_FUNCTION_ON)
+            assertEquals(firstSegment, highlightedRange())
+            key(KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.META_SHIFT_ON)
+            org.junit.Assert.assertNotEquals("Shift+Right must resize the segment", firstSegment, highlightedRange())
+            var converted = ""
+            instrumentation.runOnMainSync { converted = targetEditor.text.toString() }
+            key(KeyEvent.KEYCODE_ENTER); expect(converted, false)
+
+            clearEditor()
+            type("ka"); expect("か", true)
+            fun focus(editor: android.widget.EditText) {
+                val before = connected.get()
+                targetEditor = editor
+                instrumentation.runOnMainSync { editor.requestFocus() }
+                val timeout = android.os.SystemClock.uptimeMillis() + 10000
+                while (connected.get() == before && android.os.SystemClock.uptimeMillis() < timeout) Thread.sleep(50)
+                org.junit.Assert.assertTrue("New field must connect", connected.get() > before)
+                instrumentation.waitForIdleSync()
+            }
+            focus(activity.secondEditor)
+            type("ki"); expect("き", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("き", false)
+            focus(activity.editor)
+            expect("か", false)
+            type("ku"); expect("かく", true)
+            key(KeyEvent.KEYCODE_ENTER); expect("かく", false)
+            toggle()
+            // Exercise the exported settings UI and immediate preference-to-key routing.
+            chooseSetting("Sym+Space")
+            clearEditor()
+            key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_SYM_ON)
+            type("ka"); expect("か", true)
+            key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_SYM_ON); expect("か", false)
+            type("a"); expect("かa", false)
+            chooseSetting("Alt+Space")
+            clearEditor()
+            key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_ALT_ON)
+            type("ka"); expect("か", true)
+            key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_ALT_ON); expect("か", false)
+            chooseSetting("Fn+Space（標準）")
+            chooseSetting("Fn+J/K：前/次・Fn+U/O：縮小/拡大")
+            clearEditor(); toggle()
+            type("nihongowobenkyousuru"); key(KeyEvent.KEYCODE_SPACE)
+            val initial = highlightedRange()
+            vendorFn(KeyEvent.ACTION_DOWN)
+            try {
+                key(KeyEvent.KEYCODE_K)
+                org.junit.Assert.assertTrue(highlightedRange().first > initial.first)
+                key(KeyEvent.KEYCODE_J); assertEquals(initial, highlightedRange())
+                key(KeyEvent.KEYCODE_O)
+                org.junit.Assert.assertNotEquals(initial, highlightedRange())
+                key(KeyEvent.KEYCODE_U)
+                assertEquals(initial, highlightedRange())
+            } finally { vendorFn(KeyEvent.ACTION_UP) }
+            key(KeyEvent.KEYCODE_ENTER); toggle()
+            chooseSetting("Fn+H/L：前/次・Fn+U/O：縮小/拡大")
+            chooseSetting("変換学習オン")
+            clearEditor(); toggle()
+            type("suisei"); key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_SPACE)
+            var learned = ""
+            instrumentation.runOnMainSync { learned = targetEditor.text.toString() }
+            key(KeyEvent.KEYCODE_ENTER); expect(learned, false)
+            context.getSharedPreferences("test_expectations", 0).edit().putString("suisei", learned).commit()
+            clearEditor(); type("suisei"); key(KeyEvent.KEYCODE_SPACE)
+            expect(learned, true)
+            key(KeyEvent.KEYCODE_ENTER); toggle()
+            // Prediction/correction must not enter a password editor even in Japanese mode.
+            clearEditor(); toggle()
+            instrumentation.runOnMainSync {
+                activity.secondEditor.setText("")
+                activity.secondEditor.inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+            focus(activity.secondEditor)
+            type("fuinki"); expect("fuinki", false)
+            key(KeyEvent.KEYCODE_MINUS); expect("fuinki-", false)
+            focus(activity.editor)
+            type("ka"); expect("か", true)
+            key(KeyEvent.KEYCODE_ENTER); toggle()
+        } finally {
+            context.unregisterReceiver(receiver)
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
+}
