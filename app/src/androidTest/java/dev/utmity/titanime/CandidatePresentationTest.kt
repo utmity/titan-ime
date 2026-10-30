@@ -18,6 +18,7 @@ class CandidatePresentationTest {
             val displayed = CandidatePresentation.candidates(first)
             assertTrue(displayed.isNotEmpty() && displayed.size <= 8)
             assertTrue(displayed.all { shown -> first.allCandidateWords.candidatesList.any { it.id == shown.id && it.value == shown.value } })
+            assertEquals(first.allCandidateWords.candidatesList, CandidatePresentation.expanded(first))
             val chosen = displayed.first()
             val highlighted = engine.command(SessionCommand.CommandType.HIGHLIGHT_CANDIDATE, chosen.id)
             assertTrue(highlighted.preedit.hasHighlightedPosition())

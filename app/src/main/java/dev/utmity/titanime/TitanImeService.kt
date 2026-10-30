@@ -26,6 +26,10 @@ class TitanImeService : InputMethodService() {
     private var output = Output.getDefaultInstance()
     private var candidateRow: LinearLayout? = null
     private var menuButton: TextView? = null
+    private var modeButton: TextView? = null
+    private var microphoneButton: android.widget.ImageButton? = null
+    private var expandButton: TextView? = null
+    private var expandedIndex = 0
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private var supportPanel: LinearLayout? = null
     private val voice by lazy { VoiceInput(this) }
@@ -33,7 +37,6 @@ class TitanImeService : InputMethodService() {
     private var inlineVisible = false
     private var transformIndex = 0
     private var panel = ""
-    private var historyQuery = ""
     private var historyIndex = 0
     private var inlineBatch: InlineBatch<View>? = null
     private var autofillRow: LinearLayout? = null
@@ -182,6 +185,11 @@ class TitanImeService : InputMethodService() {
     override fun onWindowShown() {
         imeWindowVisible = true
         super.onWindowShown()
+        window?.window?.let { imeWindow ->
+            imeWindow.navigationBarColor = android.graphics.Color.WHITE
+            if (android.os.Build.VERSION.SDK_INT >= 29) imeWindow.isNavigationBarContrastEnforced = false
+            imeWindow.decorView.systemUiVisibility = imeWindow.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        }
         traceLifecycle("windowShown")
     }
     override fun onWindowHidden() {
@@ -215,7 +223,23 @@ class TitanImeService : InputMethodService() {
         val bar = LinearLayout(this@TitanImeService).apply {
             gravity = android.view.Gravity.CENTER_VERTICAL
             minimumHeight = dp(48)
+            modeButton = panelButton("あ") { toggleLanguage() }.apply { gravity = android.view.Gravity.CENTER }
+            addView(modeButton, LinearLayout.LayoutParams(dp(48), -1))
             addView(scroll, LinearLayout.LayoutParams(0, -2, 1f))
+            expandButton = panelButton("⌃") { toggleCandidates() }.apply { gravity = android.view.Gravity.CENTER }
+            addView(expandButton, LinearLayout.LayoutParams(dp(48), -1))
+            microphoneButton = android.widget.ImageButton(this@TitanImeService).apply {
+                setImageResource(R.drawable.ic_voice)
+                setBackgroundColor(android.graphics.Color.WHITE)
+                contentDescription = "音声入力"
+                isFocusable = false
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                setOnClickListener {
+                    if (voice.active) { voice.cancel(); panel = ""; renderPanel() }
+                    else { panel = "voice"; renderPanel(); startVoice() }
+                }
+            }
+            addView(microphoneButton, LinearLayout.LayoutParams(dp(48), -1))
             menuButton = panelButton("…") { voice.cancel(); panel = if (panel == "menu") "" else "menu"; renderPanel() }.apply {
                 contentDescription = "入力メニュー"
                 gravity = android.view.Gravity.CENTER
@@ -378,11 +402,9 @@ class TitanImeService : InputMethodService() {
         candidateRow?.apply {
             removeAllViews()
             menuButton?.visibility = if (!directField || inlineVisible) View.VISIBLE else View.GONE
-            addView(TextView(this@TitanImeService).apply {
-                text = if (engine == null) "Mozc unavailable" else if (!japanese) "英語" else if (output.preedit.hasHighlightedPosition()) "変換" else "日本語"
-                setTextColor(android.graphics.Color.DKGRAY)
-                setPadding(dp(8), dp(8), dp(8), dp(8))
-            })
+            modeButton?.apply { text = if (japanese) "あ" else "A"; contentDescription = if (japanese) "日本語モード・切替" else "英語モード・切替"; visibility = if (directField) View.GONE else View.VISIBLE }
+            updateVoiceButton()
+            expandButton?.apply { visibility = if (!directField && CandidatePresentation.expanded(output).size > 1) View.VISIBLE else View.GONE; text = if (panel == "candidates") "⌄" else "⌃"; contentDescription = if (panel == "candidates") "候補一覧を閉じる" else "候補一覧を開く" }
             val candidates = CandidatePresentation.candidates(output)
             val focusedId = CandidatePresentation.focusedId(output)
             if (candidates.isEmpty()) addView(TextView(this@TitanImeService).apply {
@@ -426,6 +448,14 @@ class TitanImeService : InputMethodService() {
                 })
             }
         }
+        if (panel == "candidates") {
+            if (preedit.isEmpty()) panel = ""
+            else CandidatePresentation.focusedId(output)?.let { id ->
+                val index = CandidatePresentation.expanded(output).indexOfFirst { it.id == id }
+                if (index >= 0) expandedIndex = index
+            }
+            renderPanel()
+        }
         if (updateVisibility) {
             if (!directField && (preedit.isNotEmpty() || panel.isNotEmpty())) {
                 // The input-view flag can remain true after the IME window was
@@ -445,6 +475,42 @@ class TitanImeService : InputMethodService() {
         val value = android.util.TypedValue()
         if (theme.resolveAttribute(android.R.attr.selectableItemBackground, value, true)) setBackgroundResource(value.resourceId)
         setOnClickListener { action() }
+    }
+
+    private fun updateVoiceButton() {
+        microphoneButton?.apply {
+            visibility = if (directField) View.GONE else View.VISIBLE
+            setImageResource(if (voice.active) R.drawable.ic_voice_stop else R.drawable.ic_voice)
+            contentDescription = if (voice.active) "音声入力を中止" else "音声入力"
+        }
+    }
+    private fun toggleLanguage() {
+        if (directField || engine == null) return
+        val ic = currentInputConnection ?: return
+        voice.cancel()
+        if (japanese) commitComposition(ic)
+        japanese = !japanese; preferences.japanese = japanese
+        panel = ""; renderPanel(); refreshStrip()
+    }
+    private fun toggleCandidates() {
+        if (directField) return
+        if (panel == "candidates") { panel = ""; renderPanel(); refreshStrip(updateVisibility = false); return }
+        val candidates = CandidatePresentation.expanded(output)
+        if (candidates.size < 2) return
+        voice.cancel()
+        expandedIndex = candidates.indexOfFirst { it.id == CandidatePresentation.focusedId(output) }.coerceAtLeast(0)
+        panel = "candidates"; renderPanel(); refreshStrip(updateVisibility = false)
+    }
+    private fun submitExpanded(index: Int) {
+        if (directField) return
+        val ic = currentInputConnection ?: return
+        if (!synchronizeEditor(ic)) return
+        val candidate = CandidatePresentation.expanded(output).getOrNull(index) ?: return
+        val converted = output.preedit.hasHighlightedPosition()
+        panel = ""; renderPanel()
+        val result = engine?.command(if (converted) SessionCommand.CommandType.HIGHLIGHT_CANDIDATE else SessionCommand.CommandType.SUBMIT_CANDIDATE, candidate.id) ?: return
+        applyOutput(ic, result)
+        if (converted) engine?.key(MozcKey.newBuilder().setSpecialKey(MozcKey.SpecialKey.ENTER).build())?.let { applyOutput(ic, it) }
     }
 
     private fun startVoice() {
@@ -496,12 +562,12 @@ class TitanImeService : InputMethodService() {
 
     private fun openHistory() {
         if (directField) return
-        panel = "history"; historyQuery = ""; historyIndex = 0; renderPanel(); requestShowSelf(0)
+        panel = "history"; historyIndex = 0; renderPanel(); requestShowSelf(0)
     }
-    private fun filteredHistory() = history.entries().filter { it.text.contains(historyQuery, ignoreCase = true) }
+    private fun visibleHistory() = history.entries()
     private fun pasteHistory() {
         if (directField || !history.enabled) return
-        val entry = filteredHistory().getOrNull(historyIndex) ?: return
+        val entry = visibleHistory().getOrNull(historyIndex) ?: return
         val ic = currentInputConnection ?: return
         // Pasting is an explicit edit. Finalize the current composition once,
         // rather than replacing it with a stale native session after the paste.
@@ -516,6 +582,8 @@ class TitanImeService : InputMethodService() {
         panel = ""; renderPanel()
     }
     private fun renderPanel() {
+        updateVoiceButton()
+        expandButton?.apply { text = if (panel == "candidates") "⌄" else "⌃"; contentDescription = if (panel == "candidates") "候補一覧を閉じる" else "候補一覧を開く" }
         val view = supportPanel ?: return
         view.removeAllViews()
         if (panel.isEmpty()) return
@@ -549,8 +617,9 @@ class TitanImeService : InputMethodService() {
             }
             item("入力方法を切り替える") { getSystemService(android.view.inputmethod.InputMethodManager::class.java).showInputMethodPicker() }
             if (!directField) {
-                item("Undo") { editorAction(android.R.id.undo) }
-                item("Redo") { editorAction(android.R.id.redo) }
+                menuRow = null // Always start the paired actions on the same row.
+                item("↶ Undo") { editorAction(android.R.id.undo) }
+                item("↷ Redo") { editorAction(android.R.id.redo) }
             }
             if (!directField && output.preedit.hasHighlightedPosition()) item("読みに戻す") {
                 val ic = currentInputConnection
@@ -560,11 +629,22 @@ class TitanImeService : InputMethodService() {
             item("Titan IME設定") { startActivity(android.content.Intent(this, SettingsActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
         } else if (panel == "voice" && !directField) {
             item("認識サービスへ音声が送信される場合があります。Titanは音声を保存しません") { }
-            item(voiceStatus.ifEmpty { "言語を選んで開始" }) { }
+            item(voiceStatus.ifEmpty { "音声入力" }) { }
             if (!voice.active) {
                 item("再度開始") { startVoice() }
             }
             item("キャンセル") { voice.cancel(); panel = ""; renderPanel() }
+        } else if (panel == "candidates" && !directField) {
+            val candidates = CandidatePresentation.expanded(output)
+            expandedIndex = expandedIndex.coerceIn(0, maxOf(0, candidates.lastIndex))
+            // Three rows at a time; no truncation or max-width changes to candidate text.
+            candidates.drop((expandedIndex / 3) * 3).take(3).forEachIndexed { offset, candidate ->
+                val index = (expandedIndex / 3) * 3 + offset
+                val scroll = HorizontalScrollView(this)
+                scroll.addView(panelButton((if (index == expandedIndex) "● " else "") + candidate.value) { submitExpanded(index) })
+                view.addView(scroll)
+            }
+            item("${expandedIndex + 1}/${candidates.size} ・ ${if (preferences.segments == "jk" && output.preedit.hasHighlightedPosition()) "Fn+H/L" else "Fn+K/J"}で選択・Enterで確定") { }
         } else if (panel == "transform" && !directField) {
             SelectionTransforms.labels.forEachIndexed { index, label ->
                 item((if (index == transformIndex) "▶ " else "") + label) { transformIndex = index; transformSelection() }
@@ -575,8 +655,7 @@ class TitanImeService : InputMethodService() {
             if (!history.enabled) {
                 item("履歴保存はオフです。設定から有効にできます") { }
             } else {
-                item("検索：$historyQuery （文字入力／Backspace）") { }
-                val entries = filteredHistory()
+                val entries = visibleHistory()
                 historyIndex = historyIndex.coerceIn(0, maxOf(0, entries.lastIndex))
                 entries.drop((historyIndex / 4) * 4).take(4).forEach { entry ->
                     val index = entries.indexOf(entry)
@@ -603,6 +682,20 @@ class TitanImeService : InputMethodService() {
             panel = ""; renderPanel()
             return false // Preserve existing app shortcut / Titan Alt-text routing.
         }
+        if (panel == "candidates") {
+            val alternative = preferences.segments == "jk" && output.preedit.hasHighlightedPosition()
+            val previous = if (alternative) KeyEvent.KEYCODE_H else KeyEvent.KEYCODE_K
+            val next = if (alternative) KeyEvent.KEYCODE_L else KeyEvent.KEYCODE_J
+            val count = CandidatePresentation.expanded(output).size
+            if (count == 0) { panel = ""; renderPanel(); return false }
+            when {
+                event.keyCode == KeyEvent.KEYCODE_ENTER -> { submitExpanded(expandedIndex); return true }
+                !event.isShiftPressed && (event.keyCode == KeyEvent.KEYCODE_DPAD_UP || fn && event.keyCode == previous) -> expandedIndex = (expandedIndex + count - 1) % count
+                !event.isShiftPressed && (event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN || fn && event.keyCode == next) -> expandedIndex = (expandedIndex + 1) % count
+                else -> return false // Space/segment operations retain native routing.
+            }
+            renderPanel(); return true
+        }
         if (panel == "transform") {
             when (EditingBindings.direction(event, fn, true) ?: event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> transformIndex = (transformIndex + 8) % 9
@@ -618,11 +711,7 @@ class TitanImeService : InputMethodService() {
             KeyEvent.KEYCODE_DPAD_UP -> historyIndex--
             KeyEvent.KEYCODE_DPAD_DOWN -> historyIndex++
             KeyEvent.KEYCODE_ENTER -> { pasteHistory(); return true }
-            KeyEvent.KEYCODE_DEL -> { if (historyQuery.isNotEmpty()) historyQuery = historyQuery.dropLast(Character.charCount(historyQuery.codePointBefore(historyQuery.length))); historyIndex = 0 }
-            else -> {
-                if (event.isCtrlPressed || event.isAltPressed || event.isMetaPressed || fn || event.unicodeChar < 32) return false
-                historyQuery += String(Character.toChars(event.unicodeChar)); historyIndex = 0
-            }
+            else -> { panel = ""; renderPanel(); return false }
         }
         renderPanel(); return true
     }
@@ -766,10 +855,7 @@ class TitanImeService : InputMethodService() {
         synchronizeEditor(ic)
         if (preferences.matchesToggle(event, event.isFunctionPressed || event.deviceId in titanFnDevices)) {
             if (event.repeatCount == 0 && engine != null && !directField) {
-                if (japanese) commitComposition(ic)
-                japanese = !japanese
-                preferences.japanese = japanese
-                refreshStrip()
+                toggleLanguage()
             }
             return true
         }

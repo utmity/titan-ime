@@ -1,3 +1,5 @@
+Current toolbar controls, including removal of history search, are documented in [compact-toolbar.md](compact-toolbar.md). The implementation history below predates that update.
+
 # Physical editing and input support
 
 ## Routing

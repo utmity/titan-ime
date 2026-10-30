@@ -15,6 +15,7 @@ class ClipboardIntegrationTest {
         val context = instrumentation.targetContext
         val history = ClipboardHistory(context)
         val prefs = ImePreferences(context)
+        val existingEntries = history.entries()
         val enabled = history.enabled
         val shortcut = prefs.clipboardKey
         org.junit.Assume.assumeTrue("Do not evict existing user history", history.entries().size < history.limit)
@@ -63,9 +64,10 @@ class ClipboardIntegrationTest {
             }
             waitFor { history.entries().any { it.text == token } }
             key(KeyEvent.KEYCODE_V, KeyEvent.META_FUNCTION_ON)
-            // Search a unique ASCII suffix, so preexisting history ordering does
-            // not determine which entry gets pasted.
-            token.substringAfterLast('_').forEach { key(KeyEvent.KEYCODE_0 + (it - '0')) }
+            // Select the temporary entry by its persisted list position, including pins.
+            val index = history.entries().indexOfFirst { it.text == token }
+            assertTrue(index >= 0)
+            repeat(index) { key(KeyEvent.KEYCODE_J, KeyEvent.META_FUNCTION_ON) }
             key(KeyEvent.KEYCODE_ENTER)
             fun contains(node: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
                 if (node == null) return false
@@ -74,6 +76,7 @@ class ClipboardIntegrationTest {
             waitFor { contains(instrumentation.uiAutomation.rootInActiveWindow) }
             history.pin(token); assertTrue(ClipboardHistory(context).entries().first { it.text == token }.pinned)
             history.delete(token); assertFalse(history.entries().any { it.text == token })
+            assertTrue("Existing history and pins preserved", existingEntries == ClipboardHistory(context).entries())
             val secret = ClipData.newPlainText("test", "$token-secret")
             secret.description.extras = android.os.PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
             instrumentation.runOnMainSync { clipboard.setPrimaryClip(secret) }

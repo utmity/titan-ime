@@ -323,4 +323,77 @@ class EditorCompatibilityTest {
             assertTrue(keys.any { it.action == KeyEvent.ACTION_UP })
         }
     }
+
+    private fun imeNode(label: String): android.view.accessibility.AccessibilityNodeInfo? {
+        val automation = instrumentation.uiAutomation
+        automation.serviceInfo = automation.serviceInfo.apply { flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
+        fun find(node: android.view.accessibility.AccessibilityNodeInfo?): android.view.accessibility.AccessibilityNodeInfo? {
+            if (node == null) return null
+            if (node.isVisibleToUser && (node.contentDescription?.toString() == label || node.text?.toString() == label)) return node
+            for (i in 0 until node.childCount) find(node.getChild(i))?.let { return it }
+            return null
+        }
+        return automation.windows.filter { it.root?.packageName?.toString() == "dev.utmity.titanime" }.firstNotNullOfOrNull { find(it.root) }
+    }
+    private fun tapIme(label: String) {
+        val end = android.os.SystemClock.uptimeMillis() + 4000
+        var node = imeNode(label)
+        while (node == null && android.os.SystemClock.uptimeMillis() < end) { Thread.sleep(100); node = imeNode(label) }
+        assertNotNull(label, node)
+        assertTrue(node!!.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
+        instrumentation.waitForIdleSync(); Thread.sleep(150)
+    }
+    @Test fun expandedCandidatesPreserveCompositionAndCommitOnce() {
+        type("nihongo")
+        tapIme("候補一覧を開く")
+        expect("にほんご")
+        key(KeyEvent.KEYCODE_BACK)
+        expect("にほんご")
+        instrumentation.runOnMainSync { assertEquals(0, BaseInputConnection.getComposingSpanStart(activity.editor.text)) }
+        key(KeyEvent.KEYCODE_SPACE)
+        tapIme("候補一覧を開く")
+        key(KeyEvent.KEYCODE_J, KeyEvent.META_FUNCTION_ON)
+        key(KeyEvent.KEYCODE_ENTER)
+        var committed = ""
+        instrumentation.runOnMainSync {
+            committed = activity.editor.text.toString()
+            assertTrue(committed.isNotEmpty())
+            assertEquals(-1, BaseInputConnection.getComposingSpanStart(activity.editor.text))
+        }
+        type("ka"); expect(committed + "か")
+    }
+    @Test fun toolbarModeMicrophoneAndUndoPair() {
+        type("ka"); key(KeyEvent.KEYCODE_ENTER)
+        assertNotNull(imeNode("音声入力"))
+        tapIme("日本語モード・切替")
+        assertNotNull(imeNode("英語モード・切替")); assertNotNull(imeNode("音声入力"))
+        tapIme("英語モード・切替")
+        tapIme("入力メニュー")
+        val undo = android.graphics.Rect(); val redo = android.graphics.Rect()
+        assertNotNull(imeNode("↶ Undo")); assertNotNull(imeNode("↷ Redo"))
+        imeNode("↶ Undo")!!.getBoundsInScreen(undo); imeNode("↷ Redo")!!.getBoundsInScreen(redo)
+        assertEquals(undo.top, redo.top); assertTrue(undo.right <= redo.left)
+        key(KeyEvent.KEYCODE_BACK)
+    }
+    @Test fun supportPanelsKeepSelectionAndHistoryNoLongerSearches() {
+        instrumentation.runOnMainSync { activity.editor.setText("abcd"); activity.editor.setSelection(1, 3) }
+        Thread.sleep(150)
+        for (code in listOf(KeyEvent.KEYCODE_V, KeyEvent.KEYCODE_T)) {
+            key(code, KeyEvent.META_FUNCTION_ON)
+            key(KeyEvent.KEYCODE_BACK)
+            instrumentation.runOnMainSync { assertEquals(1, activity.editor.selectionStart); assertEquals(3, activity.editor.selectionEnd) }
+        }
+        tapIme("入力メニュー"); key(KeyEvent.KEYCODE_BACK)
+        instrumentation.runOnMainSync { assertEquals(1, activity.editor.selectionStart); assertEquals(3, activity.editor.selectionEnd) }
+        key(KeyEvent.KEYCODE_V, KeyEvent.META_FUNCTION_ON)
+        key(KeyEvent.KEYCODE_A)
+        expect("aあd") // ordinary input replaces selection; no hidden search buffer
+    }
+    @Test fun microphoneDoesNotFinalizePendingReading() {
+        type("ka")
+        tapIme("音声入力") // blocked before permission/recognition: pending composition
+        expect("か")
+        instrumentation.runOnMainSync { assertEquals(0, BaseInputConnection.getComposingSpanStart(activity.editor.text)) }
+        key(KeyEvent.KEYCODE_BACK); expect("か")
+    }
 }

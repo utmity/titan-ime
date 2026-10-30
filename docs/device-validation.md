@@ -545,3 +545,13 @@ remains unverified; user-run steps are in ui-autofill-review.md.
 
 - Final settings palette-only adjustment: Debug/Release, JVM tests and Lint PASS;
   settings system-picker test PASS, 1.419 s. Final APK installed.
+
+## 2026-10-30 入力ツールバー追加
+
+- 候補一覧・モード表示・常設マイク・Undo/Redo隣接・履歴検索削除を実装。保存済み履歴の形式は変更なし。
+- T2Eキー注入: EditorCompatibilityTest 20件、Launcher 3件、入力全体1件、計24件 PASS (175.843s)。候補の開閉・確定、選択保持、通常入力への復帰を含む。
+- 最終マイクアイコン変更後: 表示/モード/Undo配置・未確定ガードの2件 PASS (5.369s)。録音は開始していない。
+- アプリ内テスト: 編集支援3件・候補ID/順序1件 PASS。履歴テストは設定画面が前面のためフォーカス取得で2回失敗。専用テスト欄を前面にして再実行し1件 PASS (3.563s)。コピー/貼り付け/ピン/削除/機密除外と既存項目保持を確認。失敗時もfinallyで設定を復元。
+- Debug/unsigned Release/AndroidTest/JVM9件/app Lint PASS。harness Lintも追加UI実装時にPASS。最新アイコン版ビルド19s。
+- 下部システムバーは実機画像で白背景/暗色アイコンを確認。ボタンと高さは残る。非表示の成功は主張しない。
+- 今回の新UIの人間による物理操作・マイク発話は未確認。以前の音声成功とは区別する。実Google/Bitwarden自動入力、最新LINE/Discord/Termuxの人間操作も未確認。

@@ -5,6 +5,8 @@ import org.mozc.android.inputmethod.japanese.protobuf.ProtoCandidateWindow.Candi
 
 /** Mozc's desktop candidate-window visibility is not Android strip visibility. */
 internal object CandidatePresentation {
+    fun expanded(output: Output): List<CandidateWord> =
+        if (output.allCandidateWords.candidatesCount > 0) output.allCandidateWords.candidatesList else candidates(output)
     fun candidates(output: Output): List<CandidateWord> {
         if (output.candidateWindow.candidateCount > 0) return output.candidateWindow.candidateList.map {
             CandidateWord.newBuilder().setId(it.id).setIndex(it.index).setValue(it.value)
