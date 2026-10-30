@@ -26,6 +26,8 @@ class TitanImeService : InputMethodService() {
     private var output = Output.getDefaultInstance()
     private var candidateRow: LinearLayout? = null
     private var menuButton: TextView? = null
+    private var imeSwitcherButton: TextView? = null
+    private var customImeSwitcherVisible = false
     private var modeButton: TextView? = null
     private var microphoneButton: android.widget.ImageButton? = null
     private var expandButton: TextView? = null
@@ -176,6 +178,7 @@ class TitanImeService : InputMethodService() {
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         traceLifecycle("startInputView restarting=$restarting")
         super.onStartInputView(info, restarting)
+        updateCaptionBar()
         refreshStrip(updateVisibility = false)
     }
     override fun onFinishInputView(finishingInput: Boolean) {
@@ -185,12 +188,25 @@ class TitanImeService : InputMethodService() {
     override fun onWindowShown() {
         imeWindowVisible = true
         super.onWindowShown()
+        updateCaptionBar()
         window?.window?.let { imeWindow ->
             imeWindow.navigationBarColor = android.graphics.Color.WHITE
             if (android.os.Build.VERSION.SDK_INT >= 29) imeWindow.isNavigationBarContrastEnforced = false
             imeWindow.decorView.systemUiVisibility = imeWindow.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         }
         traceLifecycle("windowShown")
+    }
+    private fun updateCaptionBar() {
+        // Android 16 supplies the public custom-switcher callback. Keep older
+        // devices and password/direct fields on their existing system controls.
+        if (android.os.Build.VERSION.SDK_INT < 36) return
+        val controller = window?.window?.decorView?.windowInsetsController ?: return
+        if (directField) controller.show(android.view.WindowInsets.Type.captionBar())
+        else controller.hide(android.view.WindowInsets.Type.captionBar())
+    }
+    override fun onCustomImeSwitcherButtonRequestedVisible(visible: Boolean) {
+        customImeSwitcherVisible = visible
+        imeSwitcherButton?.visibility = if (visible) View.VISIBLE else View.GONE
     }
     override fun onWindowHidden() {
         if (voice.active) voiceStatus = "画面が閉じられたため中止しました"
@@ -240,6 +256,14 @@ class TitanImeService : InputMethodService() {
                 }
             }
             addView(microphoneButton, LinearLayout.LayoutParams(dp(48), -1))
+            imeSwitcherButton = panelButton("⌨") {
+                getSystemService(android.view.inputmethod.InputMethodManager::class.java).showInputMethodPicker()
+            }.apply {
+                contentDescription = "入力方法を切り替える"
+                gravity = android.view.Gravity.CENTER
+                visibility = if (customImeSwitcherVisible) View.VISIBLE else View.GONE
+            }
+            addView(imeSwitcherButton, LinearLayout.LayoutParams(dp(48), -1))
             menuButton = panelButton("…") { voice.cancel(); panel = if (panel == "menu") "" else "menu"; renderPanel() }.apply {
                 contentDescription = "入力メニュー"
                 gravity = android.view.Gravity.CENTER
@@ -257,7 +281,12 @@ class TitanImeService : InputMethodService() {
             val bottom = if (android.os.Build.VERSION.SDK_INT >= 30)
                 insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
             else insets.systemWindowInsetBottom
-            val height = maxOf(bottom, navigationClearance)
+            // Do not infer support from an absent caption source. Only remove
+            // the legacy clearance when a real IME caption reports hidden.
+            val captionHidden = android.os.Build.VERSION.SDK_INT >= 36 &&
+                insets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.captionBar()).bottom > 0 &&
+                !insets.isVisible(android.view.WindowInsets.Type.captionBar())
+            val height = if (captionHidden) bottom else maxOf(bottom, navigationClearance)
             if (spacer.layoutParams.height != height) {
                 spacer.layoutParams = LinearLayout.LayoutParams(-1, height)
             }
@@ -608,7 +637,6 @@ class TitanImeService : InputMethodService() {
             if (!directField) {
                 item("クリップボード履歴") { openHistory() }
                 item("文字変換") { openTransforms() }
-                item("音声入力") { panel = "voice"; renderPanel(); startVoice() }
             }
             item("自動入力（入力先へ要求）") {
                 if (!directField) currentInputConnection?.let { finishForAppKey(it) }

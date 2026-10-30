@@ -555,3 +555,19 @@ remains unverified; user-run steps are in ui-autofill-review.md.
 - Debug/unsigned Release/AndroidTest/JVM9件/app Lint PASS。harness Lintも追加UI実装時にPASS。最新アイコン版ビルド19s。
 - 下部システムバーは実機画像で白背景/暗色アイコンを確認。ボタンと高さは残る。非表示の成功は主張しない。
 - 新UIの実機操作確認として、nihongo→候補展開→Fn+J→Enter、マイク1タップ→発話→物理入力復帰を依頼し、ユーザーから「よさそう」との総合回答を受領。個別の表示文字・各段階の結果は報告されていないため、詳細な個別成功までは主張しない。実Google/Bitwarden自動入力、最新LINE/Discord/Termuxの人間操作は未確認。
+
+
+## 2026-10-30 IME captionBarの非表示と音声メニュー整理
+
+開始HEAD: 89eb263987a650b0cc80a3f7bc9e0a6b1e24ec43、PR #1 open。
+
+- Android 16 AOSP NavigationBarControllerのIME専用captionBar処理を確認。T2Eでhide(captionBar())が有効。API単独はアイコンだけ消し、Titanの32dp余白は残った。
+- 非ゼロのcaptionBar Insetsが非表示になった場合だけ既存32dp余白を解除し、実navigationBars Insetsは維持。横向き1200×1076pxで下部余白60→0px、バー上端926→986px、バー自体90pxのまま。縦向き1076×1200pxでも下部余白0px（上端1110px）を確認。白背景だけの変更とは区別。
+- API36の公開onCustomImeSwitcherButtonRequestedVisibleでバー内の⌨を表示し、標準ピッカーを開く。メニューと設定画面の切替も維持。直接入力/パスワードではシステムcaptionを再表示する方針。API35以下は従来どおり。
+- compileSdkのみ36へ更新しCIのSDK取得を追加、targetSdk35維持。AGP8.7.3のcompileSdk36未検証警告は残るが、Debug/unsigned Release/JVM9件/app・harness LintはPASS（49s）。app Lintは0 errors/16 warnings。無関係なAGP更新やtargetSdk変更は行わない。
+- 「…」の音声入力項目だけ削除。メニュー重複なし・バーのマイクあり・未確定ガードを実機自動テストで確認。SpeechRecognizer設定/言語検出/キャンセルは無変更。自動テストは録音しない。
+- 実機回帰は合計27ケースを分割確認。最初は7件が入力接続準備で失敗、全体入力1件がFn+Aで失敗（106.449s）。再実行ではEditor21件成功、WASD配置とHJKL前提テストの不一致2件のみ残った。HJKLへ一時変更して残り2件PASS（109.034s）。Launcher3件・設定ピッカー1件は初回成功。単一実行27件全通過とは報告しない。
+- 一時設定変更の直前にime_settings全体を退避し、finallyで完全復元・比較。WASDは復元済み。ただし最初の旧全体テストは学習オフ後に失敗し、その前の学習値は未退避だった。ユーザーに説明して「学習オン」の回答を受け、最終状態をオンにした。辞書・学習済みデータを削除していない。今後も全体テスト前の設定退避が必要。
+- Niagara実アプリのADB確認: 通常ホームでmWindowVisible=false、h→500ms→eで「へ」、Back後の非表示、続く高速input text heでも「へ」と検索終了後非表示を確認。IME再接続直後の最初の高速注入ではhだけ残る試行あり。新旧版比較による原因特定は未実施で、初回の高速入力を全面的に回帰成功とは扱わない。shell keycombination 403はAndroidがUnknown keycodeで拒否したため物理Fn確認にも数えない。
+- ChatGPT相当の遅延スナップショット/連続Space、EditText/WebView、表示再開、直接入力などは回帰テストで確認。実ChatGPTとマイクの人間確認は依頼中。Niagaraの今回の結果はADB注入であり物理操作確認とは別。
+- 端末のナビゲーション設定/サイズ/回転設定は変更していない。非公開API、root、システムView操作なし。

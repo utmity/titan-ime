@@ -362,6 +362,21 @@ class EditorCompatibilityTest {
         }
         type("ka"); expect(committed + "か")
     }
+    @Test fun navigationBarGeometry() {
+        type("ka")
+        val rect = android.graphics.Rect()
+        imeNode("入力メニュー")!!.getBoundsInScreen(rect)
+        val capture = instrumentation.uiAutomation.takeScreenshot()
+        android.util.Log.i("TitanGeometry", "display=${capture.width}x${capture.height} menu=$rect bottomGap=${capture.height - rect.bottom}")
+        if (android.os.Build.VERSION.SDK_INT >= 36 && imeNode("入力方法を切り替える") != null) {
+            assertEquals("Hidden IME caption must not leave legacy bottom clearance", capture.height, rect.bottom)
+        }
+        java.io.File(context.getExternalFilesDir(null), "navigation-geometry.png").outputStream().use {
+            capture.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+        capture.recycle()
+        key(KeyEvent.KEYCODE_BACK)
+    }
     @Test fun toolbarModeMicrophoneAndUndoPair() {
         type("ka"); key(KeyEvent.KEYCODE_ENTER)
         assertNotNull(imeNode("音声入力"))
@@ -369,11 +384,32 @@ class EditorCompatibilityTest {
         assertNotNull(imeNode("英語モード・切替")); assertNotNull(imeNode("音声入力"))
         tapIme("英語モード・切替")
         tapIme("入力メニュー")
+        fun hasVoiceMenuItem(node: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
+            if (node == null) return false
+            return node.text?.toString() == "音声入力" || (0 until node.childCount).any { hasVoiceMenuItem(node.getChild(it)) }
+        }
+        assertFalse("Voice starts from the microphone, not a duplicate menu item",
+            instrumentation.uiAutomation.windows.any { hasVoiceMenuItem(it.root) })
+        assertNotNull("Toolbar microphone remains", imeNode("音声入力"))
         val undo = android.graphics.Rect(); val redo = android.graphics.Rect()
         assertNotNull(imeNode("↶ Undo")); assertNotNull(imeNode("↷ Redo"))
         imeNode("↶ Undo")!!.getBoundsInScreen(undo); imeNode("↷ Redo")!!.getBoundsInScreen(redo)
         assertEquals(undo.top, redo.top); assertTrue(undo.right <= redo.left)
         key(KeyEvent.KEYCODE_BACK)
+    }
+    @Test fun toolbarSystemPickerPreservesInputAndSelection() {
+        type("ka")
+        if (imeNode("入力方法を切り替える") == null) tapIme("入力メニュー")
+        val selected = android.provider.Settings.Secure.getString(context.contentResolver, android.provider.Settings.Secure.DEFAULT_INPUT_METHOD)
+        tapIme("入力方法を切り替える")
+        try {
+            val deadline = android.os.SystemClock.uptimeMillis() + 4000
+            while (instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString() !in listOf("android", "com.android.systemui", "com.android.settings") && android.os.SystemClock.uptimeMillis() < deadline) Thread.sleep(100)
+            assertTrue(instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString() in listOf("android", "com.android.systemui", "com.android.settings"))
+        } finally { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK); Thread.sleep(200) }
+        assertEquals(selected, android.provider.Settings.Secure.getString(context.contentResolver, android.provider.Settings.Secure.DEFAULT_INPUT_METHOD))
+        expect("か")
+        // Android owns composition behavior while its modal picker is open.
     }
     @Test fun supportPanelsKeepSelectionAndHistoryNoLongerSearches() {
         instrumentation.runOnMainSync { activity.editor.setText("abcd"); activity.editor.setSelection(1, 3) }

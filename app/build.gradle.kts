@@ -5,7 +5,7 @@ plugins {
 }
 android {
     namespace = "dev.utmity.titanime"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "dev.utmity.titanime"
         minSdk = 28
