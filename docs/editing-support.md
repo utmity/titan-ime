@@ -58,8 +58,9 @@ API 30+ inline suggestions use Android's InlineSuggestionsRequest and remote
 InlineContentView, with AndroidX Autofill 1.1.0 V1 styles. No suggestion content is
 read into text, persisted or logged. Old asynchronous callbacks are invalidated
 when the editor changes. Unsupported UI versions or absent suggestions are safe.
-The current implementation only requests inline suggestions in ordinary fields;
-**password/direct-field inline display is not implemented** to preserve bypass.
+Inline suggestions are now also requested for password/direct fields while the
+normal key path remains direct. Only remote provider views are rendered; no text
+is extracted. See input-extensions.md for the current scope and validation.
 The standard host autofill UI can still operate independently of Titan.
 
 The menu forwards android.R.id.autofill to the host; support is app-dependent.

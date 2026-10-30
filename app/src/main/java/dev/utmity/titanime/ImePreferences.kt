@@ -5,6 +5,9 @@ import android.view.KeyEvent
 
 internal class ImePreferences(context: Context) {
     val store = context.getSharedPreferences("ime_settings", Context.MODE_PRIVATE)
+    var transformKey: String
+        get() = store.getString("transform_key", "t") ?: "t"
+        set(value) { store.edit().putString("transform_key", value).apply() }
     var editing: Boolean
         get() = store.getBoolean("editing", true)
         set(value) { store.edit().putBoolean("editing", value).apply() }

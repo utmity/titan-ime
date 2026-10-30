@@ -53,6 +53,7 @@ class SettingsActivity : Activity() {
         choices("T2E内蔵キーボードのAlt", listOf("text" to "Altで数字・記号（標準）", "meta" to "Altをアプリへ渡す（Meta）"), if (preferences.altText) "text" else "meta") { preferences.altText = it == "text" }
         choices("通常編集のカーソル操作", listOf("on" to "Fn+H/L/K/J：左/右/上/下", "off" to "無効（アプリへ渡す）"), if (preferences.editing) "on" else "off") { preferences.editing = it == "on" }
         text("Shift併用：範囲選択、Ctrl併用：左右の単語移動。変換中は従来の文節操作を優先。上下・単語移動時は未確定を確定します。直接入力欄は対象外です。")
+        choices("文字変換", listOf("t" to "Fn+T", "g" to "Fn+G", "off" to "無効"), preferences.transformKey) { preferences.transformKey = it }
         choices("履歴呼び出し", listOf("v" to "Fn+V", "b" to "Fn+B", "off" to "キー割り当てなし"), preferences.clipboardKey) { preferences.clipboardKey = it }
         choices("通常編集の方向キー配置", listOf("hjkl" to "H/L/K/J：左/右/上/下", "wasd" to "A/D/W/S：左/右/上/下"), preferences.editingLayout) { preferences.editingLayout = it }
         choices("単語削除", listOf("off" to "無効（標準）", "on" to "Fn+BackspaceをCtrl+Backspaceとして送る"), if (preferences.wordDelete) "on" else "off") { preferences.wordDelete = it == "on" }

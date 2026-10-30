@@ -443,3 +443,32 @@ Final EditorCompatibilityTest PASS, 9 tests (25.903s), now including the observe
   provider-backed inline autofill, and cross-app Undo/Redo remain unverified unless
   separately recorded below. Password-field inline autofill is not implemented.
 
+
+
+# 2026-10-30: selection transforms, voice and password inline UI
+
+Baseline e530e74277e6406aef93c720db63c8d7d14661f9, PR #1 remained open.
+Device TITAN20000052435 connected. Read-only provider checks found Google Play
+services autofill and Google TTS recognition. No provider settings were changed.
+See input-extensions.md for APIs, supported operations and boundaries.
+
+- JVM mapping tests: 2 PASS; voice cancellation/one-shot token tests: 2 PASS.
+- EditorCompatibilityTest: 14 PASS, 34.529 s. Two new cases cover selected-only
+  uppercase, no selection, cancellation and preservation of composing text.
+- Additional all-nine-transform device test PASS, 10.517 s, including voiced
+  kana, multiline/emoji and outside-selection preservation. The first attempt
+  failed before testing because the editor connection was not ready after APK
+  update. Reconnected the already-enabled Kika/Titan IMEs, ending on Titan.
+- Existing full input sequence PASS, 104.891 s. Launcher handoff fixture 3 PASS,
+  7.694 s. These are instrumentation/key injection, not physical human trials.
+- Debug/unsigned Release, app/harness Lint and JVM tests passed. CI now runs the
+  JVM tests as well. Native Mozc was not changed.
+- App and test APKs installed. Test-harness Play Protect upload prompt was declined
+  for this installation only; no persistent setting was changed.
+- Human microphone recognition and Google/Bitwarden provider-backed filling are
+  pending. Requested a non-secret test target and explicit Japanese/English voice
+  operation. No microphone permission was silently granted and no recording was
+  started by the agent. No credential contents were inspected.
+- Fresh physical Niagara/ChatGPT/LINE/Discord/Termux regression is not claimed.
+  Previously confirmed physical behavior and this run's mock regression results
+  remain separate.

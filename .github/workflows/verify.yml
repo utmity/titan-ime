@@ -46,7 +46,7 @@ jobs:
       - name: Verify and build (no device connected)
         run: >-
           bash gradlew --no-daemon --console=plain
-          :app:lintDebug :harness:lintDebug
+          :app:testDebugUnitTest :app:lintDebug :harness:lintDebug
           :app:assembleDebug :app:assembleRelease
           :app:assembleDebugAndroidTest
           :harness:assembleDebug :harness:assembleDebugAndroidTest

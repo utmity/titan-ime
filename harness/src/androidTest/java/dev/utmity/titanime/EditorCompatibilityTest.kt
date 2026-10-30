@@ -269,4 +269,46 @@ class EditorCompatibilityTest {
             key(KeyEvent.KEYCODE_ENTER)
         }
     }
+
+    @Test fun selectedTextTransformsOnlySelection() {
+        instrumentation.runOnMainSync { activity.editor.setText("前hello😀後"); activity.editor.setSelection(1, 6) }
+        Thread.sleep(150)
+        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON)
+        key(KeyEvent.KEYCODE_ENTER)
+        expect("前HELLO😀後")
+        instrumentation.runOnMainSync { assertEquals(6, activity.editor.selectionStart) }
+        // No selection must not transform the document.
+        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON)
+        expect("前HELLO😀後")
+    }
+    @Test fun transformMenuCancelAndComposingGuard() {
+        instrumentation.runOnMainSync { activity.editor.setText("Hello"); activity.editor.selectAll() }
+        Thread.sleep(150)
+        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON)
+        key(KeyEvent.KEYCODE_BACK)
+        expect("Hello")
+        instrumentation.runOnMainSync { activity.editor.setText("") }
+        reconnect()
+        type("ka")
+        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON)
+        expect("か")
+        instrumentation.runOnMainSync { assertEquals(0, BaseInputConnection.getComposingSpanStart(activity.editor.text)) }
+        key(KeyEvent.KEYCODE_SPACE)
+        key(KeyEvent.KEYCODE_ENTER)
+    }
+
+    @Test fun selectionTransformKindsAndUnicode() {
+        val cases = listOf("hello" to "HELLO", "HELLO" to "hello", "HeLLo" to "hEllO",
+            "ＡＢＣ１２３" to "ABC123", "ABC123" to "ＡＢＣ１２３", "こんにちは" to "コンニチハ",
+            "コンニチハ" to "こんにちは", "ｶﾞﾊﾟｧｰ" to "ガパァー", "ガパァー" to "ｶﾞﾊﾟｧｰ")
+        cases.forEachIndexed { index, (source, expected) ->
+            val selected = source + "😀\n"
+            instrumentation.runOnMainSync { activity.editor.setText("前" + selected + "後"); activity.editor.setSelection(1, 1 + selected.length) }
+            Thread.sleep(150)
+            key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON)
+            repeat(index) { key(KeyEvent.KEYCODE_J, KeyEvent.META_FUNCTION_ON) }
+            key(KeyEvent.KEYCODE_ENTER)
+            expect("前" + expected + "😀\n後")
+        }
+    }
 }

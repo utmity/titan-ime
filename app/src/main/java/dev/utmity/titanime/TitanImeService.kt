@@ -26,6 +26,10 @@ class TitanImeService : InputMethodService() {
     private var output = Output.getDefaultInstance()
     private var candidateRow: LinearLayout? = null
     private var supportPanel: LinearLayout? = null
+    private val voice by lazy { VoiceInput(this) }
+    private var voiceStatus = ""
+    private var inlineVisible = false
+    private var transformIndex = 0
     private var panel = ""
     private var historyQuery = ""
     private var historyIndex = 0
@@ -82,15 +86,15 @@ class TitanImeService : InputMethodService() {
     private fun isTitanFn(event: KeyEvent) = event.keyCode == 403 && event.scanCode == 251
 
     override fun onDestroy() {
+        voice.cancel()
         clipboard.removePrimaryClipChangedListener(clipListener)
         super.onDestroy()
     }
 
     @android.annotation.TargetApi(30)
     override fun onCreateInlineSuggestionsRequest(uiExtras: android.os.Bundle): android.view.inputmethod.InlineSuggestionsRequest? {
-        // Preserve the password/direct-field bypass. No secret is read through
-        // InputConnection or copied into the IME's own data model.
-        if (directField) return null
+        // Remote provider views are independent of direct key routing. No secret
+        // is read through InputConnection or copied into the IME's own data model.
         if (!androidx.autofill.inline.UiVersions.getVersions(uiExtras).contains(androidx.autofill.inline.UiVersions.INLINE_UI_VERSION_1)) return null
         val height = (48 * resources.displayMetrics.density).toInt()
         val styles = androidx.autofill.inline.UiVersions.newStylesBuilder()
@@ -104,12 +108,19 @@ class TitanImeService : InputMethodService() {
     override fun onInlineSuggestionsResponse(response: android.view.inputmethod.InlineSuggestionsResponse): Boolean {
         val generation = ++inlineGeneration
         autofillRow?.removeAllViews()
-        if (directField || response.inlineSuggestions.isEmpty()) return false
+        inlineVisible = false
+        if (response.inlineSuggestions.isEmpty()) { refreshStrip(); return false }
+        if (autofillRow == null) setInputView(onCreateInputView())
         val row = autofillRow ?: return false
         response.inlineSuggestions.take(3).forEach { suggestion ->
             val size = suggestion.info.inlinePresentationSpec.minSize
             suggestion.inflate(this, android.util.Size(-2, size.height), mainExecutor) { content ->
-                if (generation == inlineGeneration && currentInputStarted && !directField && content != null) row.addView(content)
+                if (generation == inlineGeneration && currentInputStarted && content != null) {
+                    row.addView(content)
+                    inlineVisible = true
+                    requestShowSelf(0)
+                    refreshStrip(updateVisibility = false)
+                }
             }
         }
         return true
@@ -124,6 +135,7 @@ class TitanImeService : InputMethodService() {
 
     override fun onFinishInput() {
         traceLifecycle("finishInput")
+        voice.cancel(); inlineVisible = false
         panel = ""; inlineGeneration++; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
         traceState("finishInput")
         engine?.close()
@@ -156,13 +168,15 @@ class TitanImeService : InputMethodService() {
         traceLifecycle("windowShown")
     }
     override fun onWindowHidden() {
+        if (voice.active) voiceStatus = "画面が閉じられたため中止しました"
+        voice.cancel()
         imeWindowVisible = false
         super.onWindowHidden()
         traceLifecycle("windowHidden")
     }
     override fun onEvaluateInputViewShown(): Boolean {
         super.onEvaluateInputViewShown()
-        return !directField
+        return !directField || inlineVisible
     }
 
     // A compact input view is used instead of the candidates-only window, which
@@ -201,6 +215,7 @@ class TitanImeService : InputMethodService() {
         inputGeneration++
         lastCompositionWriteAccepted = false
         traceLifecycle("startInput restarting=$restarting package=${attribute?.packageName} type=${attribute?.inputType} field=${attribute?.fieldId} initialSelection=${attribute?.initialSelStart},${attribute?.initialSelEnd}")
+        voice.cancel(); inlineVisible = false
         panel = ""; inlineGeneration++; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
         super.onStartInput(attribute, restarting)
         engine?.setLearning(preferences.learning)
@@ -261,9 +276,10 @@ class TitanImeService : InputMethodService() {
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int,
         newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        if (voice.active && (oldSelStart != newSelStart || oldSelEnd != newSelEnd)) { voice.cancel(); voiceStatus = "カーソル移動で中止しました"; renderPanel() }
         traceState("selection old=$oldSelStart,$oldSelEnd new=$newSelStart,$newSelEnd composing=$candidatesStart,$candidatesEnd")
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
-            currentInputEditorInfo?.packageName == "dev.utmity.titanime.harness") {
+            !directField && currentInputEditorInfo?.packageName == "dev.utmity.titanime.harness") {
             android.util.Log.i("TitanImeProbe", "selection=$oldSelStart,$oldSelEnd->$newSelStart,$newSelEnd composing=$candidatesStart,$candidatesEnd length=${preedit.length}")
         }
         if (preedit.isEmpty()) return
@@ -330,7 +346,7 @@ class TitanImeService : InputMethodService() {
     private fun refreshStrip(updateVisibility: Boolean = true) {
         candidateRow?.apply {
             removeAllViews()
-            if (!directField) addView(panelButton("…") { panel = if (panel == "menu") "" else "menu"; renderPanel() })
+            if (!directField || inlineVisible) addView(panelButton("…") { voice.cancel(); panel = if (panel == "menu") "" else "menu"; renderPanel() })
             addView(TextView(this@TitanImeService).apply {
                 text = if (engine == null) "Mozc unavailable" else if (!japanese) "英語" else if (output.preedit.hasHighlightedPosition()) "変換" else "予測"
                 setTextColor(android.graphics.Color.DKGRAY)
@@ -399,7 +415,7 @@ class TitanImeService : InputMethodService() {
                 // The input-view flag can remain true after the IME window was
                 // hidden. It is not evidence that candidates are on screen.
                 if (!imeWindowVisible || !isInputViewShown || window?.window?.decorView?.isShown != true) requestShowSelf(0)
-            } else if (directField && isInputViewShown) requestHideSelf(0)
+            } else if (directField && !inlineVisible && isInputViewShown) requestHideSelf(0)
         }
     }
 
@@ -408,6 +424,53 @@ class TitanImeService : InputMethodService() {
         setTextColor(android.graphics.Color.BLACK); setPadding(18, 10, 18, 10)
         isFocusable = false; setOnClickListener { action() }
     }
+    private fun startVoice(language: String) {
+        if (directField || !currentInputStarted) return
+        if (preedit.isNotEmpty()) { notice("未確定文字列を確定してから音声入力を開始してください"); return }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            startActivity(android.content.Intent(this, MicrophonePermissionActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        }
+        val connection = currentInputConnection ?: return
+        val generation = inputGeneration
+        voice.start(language, { message -> voiceStatus = message; if (panel == "voice") renderPanel() }, { text ->
+            if (currentInputStarted && inputGeneration == generation && currentInputConnection === connection && !directField && imeWindowVisible) {
+                connection.commitText(text, 1)
+            }
+            panel = ""; voiceStatus = ""; renderPanel()
+        })
+    }
+
+    private fun notice(message: String) = android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
+    private fun openTransforms() {
+        if (directField) return
+        if (preedit.isNotEmpty()) { notice("未確定文字列を確定してから選択してください"); return }
+        if (currentInputConnection?.getSelectedText(0).isNullOrEmpty()) { notice("変換する文字を選択してください"); return }
+        panel = "transform"; transformIndex = 0; renderPanel(); requestShowSelf(0)
+    }
+    private fun transformSelection() {
+        if (directField || preedit.isNotEmpty()) return
+        val ic = currentInputConnection ?: return
+        val snapshot = ic.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0) ?: return
+        if (snapshot.partialStartOffset >= 0 || snapshot.startOffset != 0) { notice("選択範囲を取得できません"); return }
+        val text = snapshot.text?.toString() ?: return
+        val a = minOf(snapshot.selectionStart, snapshot.selectionEnd)
+        val b = maxOf(snapshot.selectionStart, snapshot.selectionEnd)
+        if (a < 0 || b > text.length || a == b || b - a > 10000) return
+        val boundaries = android.icu.text.BreakIterator.getCharacterInstance().apply { setText(text) }
+        if (!boundaries.isBoundary(a) || !boundaries.isBoundary(b)) {
+            notice("文字の途中を分断する選択範囲は変換できません"); return
+        }
+        val selected = text.substring(a, b)
+        if (ic.getSelectedText(0)?.toString() != selected) return
+        val replacement = SelectionTransforms.apply(selected, transformIndex)
+        if (replacement != selected) {
+            ic.beginBatchEdit()
+            try { ic.commitText(replacement, 1) } finally { ic.endBatchEdit() }
+        }
+        panel = ""; renderPanel()
+    }
+
     private fun openHistory() {
         if (directField) return
         panel = "history"; historyQuery = ""; historyIndex = 0; renderPanel(); requestShowSelf(0)
@@ -432,15 +495,42 @@ class TitanImeService : InputMethodService() {
     private fun renderPanel() {
         val view = supportPanel ?: return
         view.removeAllViews()
-        if (directField || panel.isEmpty()) return
+        if (panel.isEmpty()) return
         fun item(label: String, action: () -> Unit) { view.addView(panelButton(label, action)) }
         if (panel == "menu") {
-            item("クリップボード履歴") { openHistory() }
-            item("自動入力（入力先へ要求）") { editorAction(android.R.id.autofill) }
+            if (!directField) {
+                item("クリップボード履歴") { openHistory() }
+                item("文字変換") { openTransforms() }
+                item("音声入力") { panel = "voice"; renderPanel() }
+            }
+            item("自動入力（入力先へ要求）") {
+                if (!directField) currentInputConnection?.let { finishForAppKey(it) }
+                val accepted = currentInputConnection?.performContextMenuAction(android.R.id.autofill) == true
+                notice(if (accepted) "入力先へ要求しました。候補の提供はアプリ・自動入力サービスに依存します" else "候補を要求できません。入力先とAndroidの自動入力設定を確認してください")
+            }
+            item("Androidの自動入力設定") {
+                val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE)
+                    .setData(android.net.Uri.parse("package:$packageName")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (intent.resolveActivity(packageManager) != null) startActivity(intent)
+            }
             item("入力方法を切り替える") { getSystemService(android.view.inputmethod.InputMethodManager::class.java).showInputMethodPicker() }
-            item("Undo") { editorAction(android.R.id.undo) }
-            item("Redo") { editorAction(android.R.id.redo) }
+            if (!directField) {
+                item("Undo") { editorAction(android.R.id.undo) }
+                item("Redo") { editorAction(android.R.id.redo) }
+            }
             item("Titan IME設定") { startActivity(android.content.Intent(this, SettingsActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        } else if (panel == "voice" && !directField) {
+            item("認識サービスへ音声が送信される場合があります。Titanは音声を保存しません") { }
+            item(voiceStatus.ifEmpty { "言語を選んで開始" }) { }
+            if (!voice.active) {
+                item("日本語で開始") { startVoice("ja-JP") }
+                item("英語で開始") { startVoice("en-US") }
+            }
+            item("キャンセル") { voice.cancel(); panel = ""; renderPanel() }
+        } else if (panel == "transform" && !directField) {
+            SelectionTransforms.labels.forEachIndexed { index, label ->
+                item((if (index == transformIndex) "▶ " else "") + label) { transformIndex = index; transformSelection() }
+            }
         } else if (panel == "clear") {
             item("全履歴を削除する（ピン留めも含む）") { history.clear(); panel = "history"; historyIndex = 0; renderPanel() }
         } else if (panel == "history") {
@@ -464,12 +554,22 @@ class TitanImeService : InputMethodService() {
                 if (entries.isEmpty()) item("履歴なし") { }
             }
         }
-        item("閉じる（Esc）") { panel = ""; renderPanel() }
+        item("閉じる") { voice.cancel(); panel = ""; renderPanel() }
     }
 
     private fun handlePanel(event: KeyEvent, fn: Boolean): Boolean {
-        if (panel.isEmpty() || directField) return false
-        if (event.keyCode == KeyEvent.KEYCODE_ESCAPE) { panel = ""; renderPanel(); return true }
+        if (panel.isEmpty()) return false
+        if (event.keyCode == KeyEvent.KEYCODE_ESCAPE || event.keyCode == KeyEvent.KEYCODE_BACK) { voice.cancel(); panel = ""; renderPanel(); return true }
+        if (directField) return false
+        if (panel == "transform") {
+            when (EditingBindings.direction(event, fn, true) ?: event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> transformIndex = (transformIndex + 8) % 9
+                KeyEvent.KEYCODE_DPAD_DOWN -> transformIndex = (transformIndex + 1) % 9
+                KeyEvent.KEYCODE_ENTER -> { transformSelection(); return true }
+                else -> return true
+            }
+            renderPanel(); return true
+        }
         if (panel != "history") return false
         val direction = EditingBindings.direction(event, fn, true) ?: event.keyCode
         when (direction) {
@@ -604,6 +704,7 @@ class TitanImeService : InputMethodService() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         traceLifecycle("keyDown press=${event.downTime} repeat=${event.repeatCount}")
+        if (voice.active) { voice.cancel(); voiceStatus = ""; panel = ""; renderPanel() }
         val consumed = handleKey(keyCode, event)
         traceLifecycle("keyHandled press=${event.downTime} consumed=$consumed")
         val key = event.deviceId to keyCode
@@ -615,7 +716,7 @@ class TitanImeService : InputMethodService() {
     private fun handleKey(keyCode: Int, event: KeyEvent): Boolean {
         if (isTitanFn(event)) titanFnDevices.add(event.deviceId)
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
-            currentInputEditorInfo?.packageName == "dev.utmity.titanime.harness") {
+            !directField && currentInputEditorInfo?.packageName == "dev.utmity.titanime.harness") {
             android.util.Log.i("TitanImeProbe", "key=$keyCode meta=${event.metaState} japanese=$japanese connected=${currentInputConnection != null}")
         }
         val ic = currentInputConnection ?: return super.onKeyDown(keyCode, event)
@@ -638,6 +739,11 @@ class TitanImeService : InputMethodService() {
         if (!directField && fnHeld && !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed && !event.isMetaPressed &&
             preferences.clipboardKey != "off" && keyCode == (if (preferences.clipboardKey == "b") KeyEvent.KEYCODE_B else KeyEvent.KEYCODE_V)) {
             if (event.repeatCount == 0) { if (panel == "history") { panel = ""; renderPanel() } else openHistory() }
+            return true
+        }
+        if (!directField && fnHeld && !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed && !event.isMetaPressed &&
+            preferences.transformKey != "off" && keyCode == (if (preferences.transformKey == "g") KeyEvent.KEYCODE_G else KeyEvent.KEYCODE_T)) {
+            if (event.repeatCount == 0) { if (panel == "transform") { panel = ""; renderPanel() } else openTransforms() }
             return true
         }
         if (handlePanel(event, fnHeld)) return true
