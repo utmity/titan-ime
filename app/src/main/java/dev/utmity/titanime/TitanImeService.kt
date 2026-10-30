@@ -47,6 +47,22 @@ class TitanImeService : InputMethodService() {
     private val consumedKeys = mutableMapOf<Pair<Int, Int>, Boolean>()
     private var traceRevision = 0L
     private var writingBatch = false
+    private var inputGeneration = 0L
+    private var imeWindowVisible = false
+    private var lastCompositionWriteAccepted = false
+    private var initialKeyHandoff: InitialKeyHandoff? = null
+    private fun clearPressedKeys() {
+        val carried = initialKeyHandoff?.takeIf { it.live(android.os.SystemClock.uptimeMillis()) }
+            ?.physicalKey?.let { key -> consumedKeys[key]?.let { key to it } }
+        consumedKeys.clear()
+        carried?.let { consumedKeys[it.first] = it.second }
+    }
+    private fun traceLifecycle(event: String) {
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
+            android.util.Log.isLoggable("TitanLifecycle", android.util.Log.DEBUG)) {
+            android.util.Log.d("TitanLifecycle", "generation=$inputGeneration started=$currentInputStarted connected=${currentInputConnection != null} direct=$directField view=$isInputViewShown decor=${window?.window?.decorView?.isShown} preeditLength=${preedit.length} $event")
+        }
+    }
     private fun traceState(event: String) {
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
             !directField && android.util.Log.isLoggable("TitanState", android.util.Log.DEBUG)) {
@@ -100,12 +116,14 @@ class TitanImeService : InputMethodService() {
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        traceLifecycle("keyUp press=${event.downTime} repeat=${event.repeatCount}")
         if (isTitanFn(event)) titanFnDevices.remove(event.deviceId)
         if (consumedKeys.remove(event.deviceId to keyCode) == true) return true
         return super.onKeyUp(keyCode, event)
     }
 
     override fun onFinishInput() {
+        traceLifecycle("finishInput")
         panel = ""; inlineGeneration++; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
         traceState("finishInput")
         engine?.close()
@@ -115,7 +133,7 @@ class TitanImeService : InputMethodService() {
         selectedReading = null
         output = Output.getDefaultInstance()
         titanFnDevices.clear()
-        consumedKeys.clear()
+        clearPressedKeys()
         // Do not enqueue a hide here: it can arrive after the next editor starts
         // and finish that editor's new composing span. The system owns teardown.
         refreshStrip(updateVisibility = false)
@@ -123,6 +141,25 @@ class TitanImeService : InputMethodService() {
     }
 
     override fun onEvaluateFullscreenMode() = false
+    override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
+        traceLifecycle("startInputView restarting=$restarting")
+        super.onStartInputView(info, restarting)
+        refreshStrip(updateVisibility = false)
+    }
+    override fun onFinishInputView(finishingInput: Boolean) {
+        traceLifecycle("finishInputView finishing=$finishingInput")
+        super.onFinishInputView(finishingInput)
+    }
+    override fun onWindowShown() {
+        imeWindowVisible = true
+        super.onWindowShown()
+        traceLifecycle("windowShown")
+    }
+    override fun onWindowHidden() {
+        imeWindowVisible = false
+        super.onWindowHidden()
+        traceLifecycle("windowHidden")
+    }
     override fun onEvaluateInputViewShown(): Boolean {
         super.onEvaluateInputViewShown()
         return !directField
@@ -161,6 +198,9 @@ class TitanImeService : InputMethodService() {
     }
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
+        inputGeneration++
+        lastCompositionWriteAccepted = false
+        traceLifecycle("startInput restarting=$restarting package=${attribute?.packageName} type=${attribute?.inputType} field=${attribute?.fieldId} initialSelection=${attribute?.initialSelStart},${attribute?.initialSelEnd}")
         panel = ""; inlineGeneration++; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
         super.onStartInput(attribute, restarting)
         engine?.setLearning(preferences.learning)
@@ -170,19 +210,52 @@ class TitanImeService : InputMethodService() {
         selectedReading = null
         output = Output.getDefaultInstance()
         titanFnDevices.clear()
-        consumedKeys.clear()
+        clearPressedKeys()
         val type = attribute?.inputType ?: 0
         val variation = type and InputType.TYPE_MASK_VARIATION
         directField = (type and InputType.TYPE_MASK_CLASS) != InputType.TYPE_CLASS_TEXT ||
             variation in setOf(InputType.TYPE_TEXT_VARIATION_PASSWORD,
                 InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)
+        restoreInitialKey(attribute, restarting)
+        // FILTER editors may be passive type-to-search proxies. Do not inherit
+        // an old search window when entering a fresh empty filtering connection.
+        // An explicit app show request or subsequent composition may show it again.
+        if (!restarting && variation == InputType.TYPE_TEXT_VARIATION_FILTER &&
+            attribute?.initialSelStart == 0 && attribute.initialSelEnd == 0) requestHideSelf(0)
         traceState("startInput restarting=$restarting type=$type package=${attribute?.packageName} japanese=$japanese")
-        refreshStrip()
+        // A launcher may keep an invisible text editor focused on its home
+        // screen. A connection alone is not a request to show the IME window.
+        refreshStrip(updateVisibility = false)
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
             attribute?.packageName == "dev.utmity.titanime.harness") {
             sendBroadcast(android.content.Intent("dev.utmity.titanime.INPUT_READY")
                 .setPackage("dev.utmity.titanime.harness").putExtra("japanese", japanese))
         }
+    }
+
+    private fun restoreInitialKey(info: EditorInfo?, restarting: Boolean) {
+        val receipt = initialKeyHandoff ?: return
+        if (info == null || directField || !japanese || !receipt.live(android.os.SystemClock.uptimeMillis()) || info.packageName != receipt.packageName) {
+            initialKeyHandoff = null; return
+        }
+        if (!restarting) {
+            if (receipt.targetField == null && info.fieldId != receipt.sourceField && info.initialSelStart == 0 && info.initialSelEnd == 0) {
+                receipt.targetField = info.fieldId
+                traceLifecycle("firstKey targetArmed")
+            } else initialKeyHandoff = null
+            return
+        }
+        // The observed proxy->real editor transition first starts an empty field,
+        // then restarts it after copying our emitted first letter. Require both.
+        initialKeyHandoff = null
+        if (receipt.targetField != info.fieldId || info.initialSelStart != 1 || info.initialSelEnd != 1) return
+        val ic = currentInputConnection ?: return
+        val snapshot = ic.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0) ?: return
+        if (snapshot.partialStartOffset >= 0 || !receipt.matchesText(snapshot.text?.toString() ?: "", snapshot.startOffset, snapshot.selectionStart, snapshot.selectionEnd)) return
+        if (!ic.setComposingRegion(0, 1)) return
+        compositionStart = 0
+        engine?.key(MozcKey.newBuilder().setKeyCode(receipt.letter.code).build())?.let { applyOutput(ic, it) }
+        traceLifecycle("firstKey restoredFromOwnWrite")
     }
 
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int,
@@ -322,11 +395,11 @@ class TitanImeService : InputMethodService() {
             }
         }
         if (updateVisibility) {
-            if (!directField) {
+            if (!directField && (preedit.isNotEmpty() || panel.isNotEmpty())) {
                 // The input-view flag can remain true after the IME window was
                 // hidden. It is not evidence that candidates are on screen.
-                if (!isInputViewShown || window?.window?.decorView?.isShown != true) requestShowSelf(0)
-            } else if (isInputViewShown) requestHideSelf(0)
+                if (!imeWindowVisible || !isInputViewShown || window?.window?.decorView?.isShown != true) requestShowSelf(0)
+            } else if (directField && isInputViewShown) requestHideSelf(0)
         }
     }
 
@@ -454,7 +527,7 @@ class TitanImeService : InputMethodService() {
                     }
                     offset += segment.value.length
                 }
-                ic.setComposingText(styled, 1)
+                lastCompositionWriteAccepted = ic.setComposingText(styled, 1)
                 traceState("setComposing next=${next.length}")
                 preedit = next
                 output = result
@@ -530,7 +603,9 @@ class TitanImeService : InputMethodService() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        traceLifecycle("keyDown press=${event.downTime} repeat=${event.repeatCount}")
         val consumed = handleKey(keyCode, event)
+        traceLifecycle("keyHandled press=${event.downTime} consumed=$consumed")
         val key = event.deviceId to keyCode
         consumedKeys[key] = if (event.repeatCount == 0) consumed
             else consumed && consumedKeys[key] != false
@@ -680,8 +755,21 @@ class TitanImeService : InputMethodService() {
         if (unicode in 1..127) {
             val c = unicode.toChar()
             if (!c.isDigit()) {
+                val info = currentInputEditorInfo
+                val source = if (preedit.isEmpty() && c in 'a'..'z' && event.repeatCount == 0 &&
+                    !event.isShiftPressed && !imeWindowVisible && info != null &&
+                    info.inputType and InputType.TYPE_MASK_VARIATION == InputType.TYPE_TEXT_VARIATION_FILTER)
+                    ic.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0) else null
+                val eligible = source != null && source.text?.isEmpty() == true && source.startOffset == 0 &&
+                    source.selectionStart == 0 && source.selectionEnd == 0 && source.partialStartOffset < 0
+                initialKeyHandoff = null
                 val result = engine!!.key(MozcKey.newBuilder().setKeyCode(c.lowercaseChar().code).build())
                 applyOutput(ic, result)
+                if (eligible && lastCompositionWriteAccepted && result.consumed && !result.hasResult() && preedit == c.toString()) {
+                    initialKeyHandoff = InitialKeyHandoff(info!!.packageName, info.fieldId, c,
+                        android.os.SystemClock.uptimeMillis(), event.deviceId to event.keyCode)
+                    traceLifecycle("firstKey receiptCreated")
+                }
                 return result.consumed
             }
             if (preedit.isNotEmpty()) {

@@ -388,6 +388,27 @@ Final EditorCompatibilityTest PASS, 9 tests (25.903s), now including the observe
 
 # 2026-10-29: batch synchronization and editing support
 
+## Subsequent Niagara lifecycle work
+
+- Latest baseline was 3085282. Real Niagara home/search metadata and ordered
+  diagnostic events distinguished unsolicited UI display from native-session reset.
+  See launcher-lifecycle.md. No package-name exception or native Mozc change.
+- Actual-app ADB injection: he/ka/shi/konnichiha yielded へ/か/し/こんにちは
+  after the final window-callback fix, with home window hidden on each repetition.
+  A second pass without added per-key sleeps also passed. Earlier failed passes
+  remain documented; an initial successful he trial was not generalized to all runs.
+- LauncherHandoffTest final 3 PASS, 8.821 s; full input regression PASS, 105.348 s;
+  EditorCompatibilityTest 12 PASS, 33.651 s. Debug/Release and app/harness Lint PASS.
+- Physical Niagara trial confirmed by the user (recorded 2026-10-30): direct
+  home typing produced へ and こんにちは; closing search with Android Back hid
+  the white bar on home. ka/shi are injection-only. Fresh physical
+  LINE/Discord/Termux trials remain unverified for this change.
+- Prior human editing trial: user confirmed Fn+H middle insertion/correction,
+  conversion/commit and Fn+V opening worked. Esc was not tested because T2E has
+  no Escape key. Repeat Fn+V or the close button is the documented alternative.
+- Test harness install prompted Play Protect to upload an unknown APK. Chose
+  the one-time decline; persistent upload settings were not changed.
+
 - Actual physical ChatGPT trial: user confirmed composition remained active and
   repeated Space (including more than twice) continued conversion. No message was
   sent by the agent. Debug metadata trace retained conversion state; diagnostic
