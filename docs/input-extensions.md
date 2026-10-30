@@ -27,7 +27,9 @@ not provide a cross-process compare-and-swap transaction.
 
 ## Voice
 
-… → 音声入力 exposes Japanese and English start buttons, status and cancellation.
+… → 音声入力 starts recognition directly, with status and cancellation.
+The persistent setting is Auto (device language), Japanese preferred or English
+preferred. No language selection is required on each start.
 SpeechRecognizer keeps the editor focused, unlike launching a recognition Activity
 with RecognizerIntent. Switching to another voice IME would delegate UI and results
 but cannot guarantee a return to Titan, so it is not used. The installed default
@@ -91,3 +93,31 @@ are changed by the tests.
 - [IME autofill integration](https://developer.android.com/identity/autofill/ime-autofill)
 - [SpeechRecognizer](https://developer.android.com/reference/android/speech/SpeechRecognizer)
 - [RecognizerIntent](https://developer.android.com/reference/android/speech/RecognizerIntent)
+
+
+## Automatic voice language update
+
+Android 14/API 34 introduces detection and switching extras. Titan requests
+EXTRA_ENABLE_LANGUAGE_DETECTION and EXTRA_ENABLE_LANGUAGE_SWITCH with
+LANGUAGE_SWITCH_BALANCED, restricting detection/switching to ja-JP/en-US via
+EXTRA_LANGUAGE_DETECTION_ALLOWED_LANGUAGES and EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES.
+EXTRA_LANGUAGE always supplies the preferred/device fallback language. Older OS
+versions use that language without the optional extras. Mixed-language recognition
+is service/model dependent, not guaranteed by these settings alone.
+
+RecognitionListener.onLanguageDetection updates only a Japanese/English status
+label, never commits text. A detected language is not proof of a successful switch.
+Services can ignore optional extras; switching also requires suitable downloaded
+models. Titan does not download models or change the installed recognition service.
+On ERROR_CLIENT, ERROR_LANGUAGE_NOT_SUPPORTED or ERROR_LANGUAGE_UNAVAILABLE during
+an automatic attempt, Titan retries once without switching and asks the user to
+repeat. Other errors do not cause a retry. An unavailable fallback language may
+still fail; the implementation cannot make an unsupported language recognizable.
+Pending retries are covered by the same cancellation token and active-state guard,
+so focus changes, physical keys or cancellation cannot restart the microphone later.
+
+The initial microphone permission grant remains a separate Android interaction;
+recording never starts automatically after granting permission. From an open …
+menu the normal start takes one tap, two taps including opening the menu. No new
+permission was added. API/model support and actual Japanese/English/mixed speech
+must be reported separately.

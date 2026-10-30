@@ -424,7 +424,7 @@ class TitanImeService : InputMethodService() {
         setTextColor(android.graphics.Color.BLACK); setPadding(18, 10, 18, 10)
         isFocusable = false; setOnClickListener { action() }
     }
-    private fun startVoice(language: String) {
+    private fun startVoice() {
         if (directField || !currentInputStarted) return
         if (preedit.isNotEmpty()) { notice("未確定文字列を確定してから音声入力を開始してください"); return }
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -433,7 +433,7 @@ class TitanImeService : InputMethodService() {
         }
         val connection = currentInputConnection ?: return
         val generation = inputGeneration
-        voice.start(language, { message -> voiceStatus = message; if (panel == "voice") renderPanel() }, { text ->
+        voice.start(VoiceLanguagePolicy.primary(preferences.voiceLanguage, java.util.Locale.getDefault().toLanguageTag()), { message -> voiceStatus = message; if (panel == "voice") renderPanel() }, { text ->
             if (currentInputStarted && inputGeneration == generation && currentInputConnection === connection && !directField && imeWindowVisible) {
                 connection.commitText(text, 1)
             }
@@ -501,7 +501,7 @@ class TitanImeService : InputMethodService() {
             if (!directField) {
                 item("クリップボード履歴") { openHistory() }
                 item("文字変換") { openTransforms() }
-                item("音声入力") { panel = "voice"; renderPanel() }
+                item("音声入力") { panel = "voice"; renderPanel(); startVoice() }
             }
             item("自動入力（入力先へ要求）") {
                 if (!directField) currentInputConnection?.let { finishForAppKey(it) }
@@ -523,8 +523,7 @@ class TitanImeService : InputMethodService() {
             item("認識サービスへ音声が送信される場合があります。Titanは音声を保存しません") { }
             item(voiceStatus.ifEmpty { "言語を選んで開始" }) { }
             if (!voice.active) {
-                item("日本語で開始") { startVoice("ja-JP") }
-                item("英語で開始") { startVoice("en-US") }
+                item("再度開始") { startVoice() }
             }
             item("キャンセル") { voice.cancel(); panel = ""; renderPanel() }
         } else if (panel == "transform" && !directField) {

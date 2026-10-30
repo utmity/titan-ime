@@ -476,3 +476,28 @@ See input-extensions.md for APIs, supported operations and boundaries.
 - Fresh physical Niagara/ChatGPT/LINE/Discord/Termux regression is not claimed.
   Previously confirmed physical behavior and this run's mock regression results
   remain separate.
+
+
+# 2026-10-30: one-tap voice language selection
+
+Baseline 55eebc3, existing PR #1 open. Menu voice action now starts immediately;
+language preference persists in settings. Android API 34+ optional Japanese/English
+detection/switching extras are requested with balanced sensitivity. Detection
+callbacks affect status only, not composing or committed text.
+
+- Debug/unsigned Release, Lint and all 6 JVM tests PASS. Two new tests verify
+  device/preferred language selection and bounded fallback for unsupported-language,
+  unavailable-language and client errors. Network/no-match/permission errors do
+  not retry. Existing result-token tests cover duplicate/cancelled callbacks.
+- Real T2E EditorCompatibilityTest: 15 PASS, 49.450 s. Includes selected transforms,
+  ChatGPT batch-state fixture, WebView and candidate lifecycle regressions.
+- Final APK installed, Titan reconnected using the already-enabled Kika fallback.
+  No microphone permission or recognition-provider setting was changed.
+- Japanese, English, mixed speech, detected-language status and subsequent physical
+  typing requested from the user; this update's human results are pending.
+- A genuinely non-switching recognition service was not installed or selected.
+  Fallback policy tests are not proof of compatibility with every such service.
+  Optional flags may be ignored; model-related failures may require a repeated
+  utterance when falling back. No recording is retained for replay.
+- Initial permission grant still requires a separate explicit start afterwards.
+  Normal flow: one tap from the open menu, two including the … button.
