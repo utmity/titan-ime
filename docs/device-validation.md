@@ -554,4 +554,4 @@ remains unverified; user-run steps are in ui-autofill-review.md.
 - アプリ内テスト: 編集支援3件・候補ID/順序1件 PASS。履歴テストは設定画面が前面のためフォーカス取得で2回失敗。専用テスト欄を前面にして再実行し1件 PASS (3.563s)。コピー/貼り付け/ピン/削除/機密除外と既存項目保持を確認。失敗時もfinallyで設定を復元。
 - Debug/unsigned Release/AndroidTest/JVM9件/app Lint PASS。harness Lintも追加UI実装時にPASS。最新アイコン版ビルド19s。
 - 下部システムバーは実機画像で白背景/暗色アイコンを確認。ボタンと高さは残る。非表示の成功は主張しない。
-- 今回の新UIの人間による物理操作・マイク発話は未確認。以前の音声成功とは区別する。実Google/Bitwarden自動入力、最新LINE/Discord/Termuxの人間操作も未確認。
+- 新UIの実機操作確認として、nihongo→候補展開→Fn+J→Enter、マイク1タップ→発話→物理入力復帰を依頼し、ユーザーから「よさそう」との総合回答を受領。個別の表示文字・各段階の結果は報告されていないため、詳細な個別成功までは主張しない。実Google/Bitwarden自動入力、最新LINE/Discord/Termuxの人間操作は未確認。
