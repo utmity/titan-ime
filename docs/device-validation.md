@@ -569,5 +569,5 @@ remains unverified; user-run steps are in ui-autofill-review.md.
 - 実機回帰は合計27ケースを分割確認。最初は7件が入力接続準備で失敗、全体入力1件がFn+Aで失敗（106.449s）。再実行ではEditor21件成功、WASD配置とHJKL前提テストの不一致2件のみ残った。HJKLへ一時変更して残り2件PASS（109.034s）。Launcher3件・設定ピッカー1件は初回成功。単一実行27件全通過とは報告しない。
 - 一時設定変更の直前にime_settings全体を退避し、finallyで完全復元・比較。WASDは復元済み。ただし最初の旧全体テストは学習オフ後に失敗し、その前の学習値は未退避だった。ユーザーに説明して「学習オン」の回答を受け、最終状態をオンにした。辞書・学習済みデータを削除していない。今後も全体テスト前の設定退避が必要。
 - Niagara実アプリのADB確認: 通常ホームでmWindowVisible=false、h→500ms→eで「へ」、Back後の非表示、続く高速input text heでも「へ」と検索終了後非表示を確認。IME再接続直後の最初の高速注入ではhだけ残る試行あり。新旧版比較による原因特定は未実施で、初回の高速入力を全面的に回帰成功とは扱わない。shell keycombination 403はAndroidがUnknown keycodeで拒否したため物理Fn確認にも数えない。
-- ChatGPT相当の遅延スナップショット/連続Space、EditText/WebView、表示再開、直接入力などは回帰テストで確認。実ChatGPTとマイクの人間確認は依頼中。Niagaraの今回の結果はADB注入であり物理操作確認とは別。
+- ChatGPT相当の遅延スナップショット/連続Space、EditText/WebView、表示再開、直接入力などは回帰テストで確認。実ChatGPTでnihongo→Space→Space、確定後のマイク→物理入力復帰、下部矢印行の非表示、⌨からのIMEピッカーを依頼し、ユーザーから「全部問題ないかな」と総合確認を受領。個別の表示文字・発話内容は報告されていない。Niagaraの今回の結果はADB注入であり物理操作確認とは別。
 - 端末のナビゲーション設定/サイズ/回転設定は変更していない。非公開API、root、システムView操作なし。
