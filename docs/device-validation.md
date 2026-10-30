@@ -465,10 +465,14 @@ See input-extensions.md for APIs, supported operations and boundaries.
   JVM tests as well. Native Mozc was not changed.
 - App and test APKs installed. Test-harness Play Protect upload prompt was declined
   for this installation only; no persistent setting was changed.
-- Human microphone recognition and Google/Bitwarden provider-backed filling are
-  pending. Requested a non-secret test target and explicit Japanese/English voice
-  operation. No microphone permission was silently granted and no recording was
-  started by the agent. No credential contents were inspected.
+- Human microphone trial: the user confirmed Japanese speech was recognized and
+  inserted successfully. English was reported as broadly working; recognition
+  accuracy was not established. The spoken content is not retained in this record.
+  Duplicate-result prevention, cancellation and subsequent physical typing were
+  not individually confirmed by that report. Google/Bitwarden provider-backed
+  filling remains unverified; the user elected to check it independently.
+  No microphone permission was silently granted and no recording was started
+  by the agent. No credential contents were inspected.
 - Fresh physical Niagara/ChatGPT/LINE/Discord/Termux regression is not claimed.
   Previously confirmed physical behavior and this run's mock regression results
   remain separate.

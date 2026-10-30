@@ -79,8 +79,12 @@ are changed by the tests.
 - Launcher handoff: 3 passed, 7.694 s (injected fixture, not new human Niagara trial).
 - Voice result-token tests and all nine device transform cases added subsequently;
   final results recorded in device-validation.md.
-- Real microphone Japanese/English recognition, provider-backed inline filling,
-  permission denial and service-unavailable UI require separate device validation.
+- Human microphone trial: Japanese recognition and insertion confirmed by the
+  user; English reported as broadly working, without an accuracy assessment.
+  This does not independently verify cancellation, duplicate callbacks or typing
+  after recognition. Provider-backed inline filling is left to the user's own
+  check and remains unverified. Permission denial and service-unavailable UI also
+  require separate device validation.
 
 ## Public API references
 
