@@ -493,8 +493,11 @@ callbacks affect status only, not composing or committed text.
   ChatGPT batch-state fixture, WebView and candidate lifecycle regressions.
 - Final APK installed, Titan reconnected using the already-enabled Kika fallback.
   No microphone permission or recognition-provider setting was changed.
-- Japanese, English, mixed speech, detected-language status and subsequent physical
-  typing requested from the user; this update's human results are pending.
+- Human trial: the user reported basic voice operation looked good and physical
+  typing worked afterwards. English pronunciation was difficult for the user;
+  English/mixed-speech accuracy was not established. No individual transcripts or
+  detected-language/fallback status were reported, so actual automatic language
+  switching is not independently confirmed.
 - A genuinely non-switching recognition service was not installed or selected.
   Fallback policy tests are not proof of compatibility with every such service.
   Optional flags may be ignored; model-related failures may require a repeated

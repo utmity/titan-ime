@@ -121,3 +121,8 @@ recording never starts automatically after granting permission. From an open …
 menu the normal start takes one tap, two taps including opening the menu. No new
 permission was added. API/model support and actual Japanese/English/mixed speech
 must be reported separately.
+
+Human follow-up on this update: basic voice operation and subsequent physical
+typing were reported working. English/mixed recognition accuracy and actual
+language-switch callbacks remain unverified; the user did not report individual
+transcripts or detected-language/fallback labels.
