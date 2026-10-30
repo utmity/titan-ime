@@ -504,3 +504,44 @@ callbacks affect status only, not composing or committed text.
   utterance when falling back. No recording is retained for replay.
 - Initial permission grant still requires a separate explicit start afterwards.
   Normal flow: one tap from the open menu, two including the … button.
+
+
+# 2026-10-30: inline lifecycle and approved compact UI
+
+Baseline b09da3a; PR #1 open. Google Play services autofill was confirmed as the
+configured provider by read-only settings lookup. No real credentials, vault data,
+provider selection or authentication submission were used. Google/Bitwarden filling
+remains unverified; user-run steps are in ui-autofill-review.md.
+
+- Inline rendering audit found that late callbacks could request a window after
+  hide, and arrival order changed provider ranking. InlineBatch now retains order,
+  rejects duplicate/cancelled callbacks and releases references on invalidation.
+  Remote surfaces already shown are not detached during ordering updates.
+- All-failed/null inflation and synchronous presentation exceptions are contained.
+  No credential text is inspected, committed, logged or learned by Titan.
+- Ctrl/Alt/Meta in a support panel now return to the established routing path.
+  Added a real-editor Ctrl+Z Down/Up delivery assertion.
+- Before UI changes: 20 T2E instrumentation tests PASS, 165.086 s (16 editor,
+  3 launcher fixture, 1 long input sequence).
+- User approved candidate bar/menu/settings cleanup; expanded candidate list was
+  explicitly deferred. Implemented fixed …, candidate-first row, selected-candidate
+  contrast, 2-column menu and 5 collapsible settings groups. Existing preference
+  keys and physical bindings unchanged. Reading/original-text actions are in …;
+  segment navigation uses existing Fn controls and editor-segment taps.
+- Debug/unsigned Release, app/harness Lint and all 9 JVM tests PASS. Three new
+  InlineBatch tests cover reordering, invalidation and complete inflation failure.
+- After UI changes: editor 16 and launcher 3 passed. Long input test initially
+  failed at its obsolete original-text tap path; moved that remaining test action
+  through …, matching the new UI. No successful provider test is inferred from this.
+- Actual dedicated-editor screenshot confirms visible candidates, selection
+  emphasis and fixed menu. User physical evaluation of the new layout is separate.
+- Existing voice human results are retained; recording was not restarted for this
+  UI audit. No fresh human LINE/Discord/Termux or provider-backed autofill claim.
+
+- Final unchanged-app rerun: InputDeviceTest + ImePickerUiTest 2 PASS, 106.508 s.
+  The harness-only route update also passed build/Lint. Settings screenshot and
+  accessibility tree confirmed all five category headers and top-level IME picker.
+  Actual provider-backed remote filling is still unverified.
+
+- Final settings palette-only adjustment: Debug/Release, JVM tests and Lint PASS;
+  settings system-picker test PASS, 1.419 s. Final APK installed.

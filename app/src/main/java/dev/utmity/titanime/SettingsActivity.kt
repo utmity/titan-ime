@@ -11,9 +11,11 @@ class SettingsActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         setTheme(android.R.style.Theme_Material_Light_NoActionBar)
         super.onCreate(state)
+        window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
         preferences = ImePreferences(this)
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundColor(android.graphics.Color.WHITE)
             val padding = (20 * resources.displayMetrics.density).toInt()
             setPadding(padding, padding, padding, padding)
             setOnApplyWindowInsetsListener { view, insets ->
@@ -24,19 +26,48 @@ class SettingsActivity : Activity() {
                 insets
             }
         }
-        fun text(value: String) = TextView(this).apply { text = value; textSize = 18f; content.addView(this) }
+        var target = content
+        fun text(value: String) = TextView(this).apply {
+            text = value; textSize = 18f; setTextColor(0xff202124.toInt()); target.addView(this)
+        }
         text("Titan IME 設定")
         mode = text("")
-        content.addView(Button(this).apply {
+        target.addView(Button(this).apply {
             text = "入力方法を切り替える"
             setOnClickListener {
                 getSystemService(android.view.inputmethod.InputMethodManager::class.java).showInputMethodPicker()
             }
         })
-        content.addView(Button(this).apply { text = "ユーザー辞書"; setOnClickListener {
+        val sections = linkedMapOf<String, LinearLayout>()
+        for (title in listOf("入力・変換", "物理キー", "辞書・学習・履歴", "音声・自動入力", "操作ガイド")) {
+            val body = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                visibility = android.view.View.GONE
+                setPadding(12, 0, 12, 16)
+            }
+            val header = Button(this).apply {
+                text = "＋ $title"
+                gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
+                setOnClickListener {
+                    val opening = body.visibility != android.view.View.VISIBLE
+                    body.visibility = if (opening) android.view.View.VISIBLE else android.view.View.GONE
+                    text = (if (opening) "− " else "＋ ") + title
+                }
+            }
+            content.addView(header); content.addView(body)
+            sections[title] = body
+        }
+        target = sections.getValue("辞書・学習・履歴")
+        target.addView(Button(this).apply { text = "ユーザー辞書"; setOnClickListener {
             startActivity(android.content.Intent(this@SettingsActivity, UserDictionaryActivity::class.java))
         } })
         fun choices(title: String, values: List<Pair<String, String>>, current: String, save: (String) -> Unit) {
+            target = sections.getValue(when {
+                title.startsWith("音声") -> "音声・自動入力"
+                title.startsWith("履歴件数") || title.startsWith("クリップボード") || title.startsWith("端末内") -> "辞書・学習・履歴"
+                title.startsWith("入力中") || title.startsWith("Mozc") -> "入力・変換"
+                else -> "物理キー"
+            })
             text(title)
             val group = RadioGroup(this)
             val ids = mutableMapOf<Int, String>()
@@ -47,7 +78,7 @@ class SettingsActivity : Activity() {
                 if (value == current) group.check(button.id)
             }
             group.setOnCheckedChangeListener { _, id -> ids[id]?.let(save) }
-            content.addView(group)
+            target.addView(group)
         }
         choices("日英切り替え（保存後すぐ反映）", listOf("fn" to "Fn+Space（標準）", "sym" to "Sym+Space", "alt" to "Alt+Space"), preferences.toggle) { preferences.toggle = it }
         choices("T2E内蔵キーボードのAlt", listOf("text" to "Altで数字・記号（標準）", "meta" to "Altをアプリへ渡す（Meta）"), if (preferences.altText) "text" else "meta") { preferences.altText = it == "text" }
@@ -63,11 +94,12 @@ class SettingsActivity : Activity() {
         choices("クリップボード履歴（端末内保存）", listOf("off" to "保存しない（標準）", "on" to "保存する"), if (history.enabled) "on" else "off") { history.enabled = it == "on" }
         choices("履歴件数（ピン留めを含む）", listOf("10" to "10件", "20" to "20件", "50" to "50件"), history.limit.toString()) { history.limit = it.toInt() }
         text("有効な通常入力欄がある間の新しいコピーのみ保存。機密フラグ付き・パスワード欄・URI・1万文字超は保存しません。機密フラグのない秘密情報は識別できないため、その場合は保存を無効にしてください。オフにしても保存済み履歴は残ります。")
-        content.addView(Button(this).apply { text = "全履歴を削除…"; setOnClickListener {
+        target.addView(Button(this).apply { text = "全履歴を削除…"; setOnClickListener {
             android.app.AlertDialog.Builder(this@SettingsActivity).setMessage("ピン留めを含む保存済み履歴を削除しますか？")
                 .setNegativeButton("キャンセル", null).setPositiveButton("削除") { _, _ -> history.clear() }.show()
         } })
-        content.addView(Button(this).apply { text = "Androidの自動入力設定"; setOnClickListener {
+        target = sections.getValue("音声・自動入力")
+        target.addView(Button(this).apply { text = "Androidの自動入力設定"; setOnClickListener {
             val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE)
                 .setData(android.net.Uri.parse("package:$packageName"))
             if (intent.resolveActivity(packageManager) != null) startActivity(intent)
@@ -77,8 +109,19 @@ class SettingsActivity : Activity() {
         choices("入力中の予測候補", listOf("on" to "予測変換オン", "off" to "予測変換オフ"), if (preferences.prediction) "on" else "off") { preferences.prediction = it == "on" }
         choices("Mozc標準の訂正候補（自動置換なし）", listOf("on" to "訂正候補オン", "off" to "訂正候補オフ"), if (preferences.correction) "on" else "off") { preferences.correction = it == "on" }
         text("訂正オンでは濁点・半濁点・小書きかなの違いも候補検索に含めます。例：かつこう→学校。元の読みは「そのまま」で確定できます。一般的な脱字や隣接キーの打ち間違いには未対応です。")
+        target = sections.getValue("操作ガイド")
         text("Space：変換・次候補\nEnter：確定（再度で改行）\nBackspace：削除\n記号 - , . → ー 、 。\n文節長変更はFn+U（縮小）/Fn+O（拡大）。\nCtrl+Shift+Jは廃止しました。\n端末独自のショートカットが優先される場合は別の切替を選んでください。\nパスワード・数字欄は直接入力です。\n学習は端末内のみ。オフでも保存済み履歴は消しません。")
-        setContentView(ScrollView(this).apply { addView(content) })
+        fun styleButtons(view: android.view.View) {
+            if (view is Button && view !is CompoundButton) {
+                view.setTextColor(0xff202124.toInt())
+                view.backgroundTintList = android.content.res.ColorStateList.valueOf(0xfff1f3f4.toInt())
+                view.elevation = 0f
+                view.stateListAnimator = null
+            }
+            if (view is android.view.ViewGroup) for (i in 0 until view.childCount) styleButtons(view.getChildAt(i))
+        }
+        styleButtons(content)
+        setContentView(ScrollView(this).apply { setBackgroundColor(android.graphics.Color.WHITE); addView(content) })
     }
     override fun onResume() {
         super.onResume()

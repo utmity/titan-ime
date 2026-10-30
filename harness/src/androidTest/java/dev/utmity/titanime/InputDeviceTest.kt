@@ -89,7 +89,10 @@ class InputDeviceTest {
                 var selected = false
                 while (!selected && android.os.SystemClock.uptimeMillis() < deadline) {
                     val root = instrumentation.uiAutomation.rootInActiveWindow
-                    val node = root?.findAccessibilityNodeInfosByText(label)?.firstOrNull { it.text?.toString() == label }
+                    val section = if (label.contains("学習")) "辞書・学習・履歴" else if (label.contains("予測") || label.contains("訂正")) "入力・変換" else "物理キー"
+                    root?.findAccessibilityNodeInfosByText("＋ $section")?.firstOrNull { it.text?.toString() == "＋ $section" }
+                        ?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                    val node = instrumentation.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(label)?.firstOrNull { it.text?.toString() == label }
                     if (node != null) selected = node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
                     if (!selected) Thread.sleep(100)
                 }
@@ -421,7 +424,7 @@ class InputDeviceTest {
             clearEditor(); type("fuinki"); expect("ふいんき", true)
             tapImeText("雰囲気（訂正）"); expect("雰囲気", false)
             clearEditor(); type("fuinki"); expect("ふいんき", true)
-            tapImeText("そのまま：ふいんき"); expect("ふいんき", false)
+            tapImeText("…"); tapImeText("そのまま：ふいんき"); expect("ふいんき", false)
             clearEditor(); type("katukou"); expect("かつこう", true)
             tapImeText("学校"); expect("学校", false)
             type("ka"); expect("学校か", true)
@@ -429,7 +432,7 @@ class InputDeviceTest {
             clearEditor(); type("hiyouin"); expect("ひよういn", true)
             tapImeText("病院"); expect("病院", false)
             clearEditor(); type("katukou"); expect("かつこう", true)
-            tapImeText("そのまま：かつこう"); expect("かつこう", false)
+            tapImeText("…"); tapImeText("そのまま：かつこう"); expect("かつこう", false)
             chooseSetting("予測変換オフ")
             clearEditor(); type("nihongo"); expect("にほんご", true)
             key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
@@ -437,7 +440,7 @@ class InputDeviceTest {
             chooseSetting("予測変換オン")
             clearEditor()
             type("nihongo"); key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
-            tapImeText("読みに戻す"); expect("にほんご", true)
+            tapImeText("…"); tapImeText("読みに戻す"); expect("にほんご", true)
             key(KeyEvent.KEYCODE_SPACE); expect("日本語", true)
             key(KeyEvent.KEYCODE_ESCAPE); expect("にほんご", true)
             key(KeyEvent.KEYCODE_ENTER); expect("にほんご", false)
@@ -566,9 +569,9 @@ class InputDeviceTest {
             org.junit.Assert.assertTrue("Right must focus a later segment", secondSegment.first > firstSegment.first)
             key(KeyEvent.KEYCODE_DPAD_LEFT)
             assertEquals(firstSegment, highlightedRange())
-            tapImeText("次文節")
+            key(KeyEvent.KEYCODE_L, KeyEvent.META_FUNCTION_ON)
             assertEquals(secondSegment, highlightedRange())
-            tapImeText("前文節")
+            key(KeyEvent.KEYCODE_H, KeyEvent.META_FUNCTION_ON)
             assertEquals(firstSegment, highlightedRange())
             key(KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.META_SHIFT_ON)
             org.junit.Assert.assertNotEquals("Shift+Right must resize the segment", firstSegment, highlightedRange())

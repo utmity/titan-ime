@@ -25,6 +25,8 @@ class TitanImeService : InputMethodService() {
     private var preedit = ""
     private var output = Output.getDefaultInstance()
     private var candidateRow: LinearLayout? = null
+    private var menuButton: TextView? = null
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private var supportPanel: LinearLayout? = null
     private val voice by lazy { VoiceInput(this) }
     private var voiceStatus = ""
@@ -33,7 +35,7 @@ class TitanImeService : InputMethodService() {
     private var panel = ""
     private var historyQuery = ""
     private var historyIndex = 0
-    private var inlineGeneration = 0
+    private var inlineBatch: InlineBatch<View>? = null
     private var autofillRow: LinearLayout? = null
     private val history by lazy { ClipboardHistory(this) }
     private val clipboard by lazy { getSystemService(android.content.ClipboardManager::class.java) }
@@ -106,21 +108,36 @@ class TitanImeService : InputMethodService() {
 
     @android.annotation.TargetApi(30)
     override fun onInlineSuggestionsResponse(response: android.view.inputmethod.InlineSuggestionsResponse): Boolean {
-        val generation = ++inlineGeneration
+        inlineBatch?.cancel()
+        inlineBatch = null
         autofillRow?.removeAllViews()
         inlineVisible = false
         if (response.inlineSuggestions.isEmpty()) { refreshStrip(); return false }
         if (autofillRow == null) setInputView(onCreateInputView())
         val row = autofillRow ?: return false
-        response.inlineSuggestions.take(3).forEach { suggestion ->
+        val suggestions = response.inlineSuggestions.take(3)
+        val batch = InlineBatch<View>(suggestions.size)
+        inlineBatch = batch
+        fun accept(index: Int, content: View?) {
+            if (inlineBatch !== batch || autofillRow !== row || !currentInputStarted || !batch.complete(index, content)) return
+            // Insert newly completed views in provider order without detaching
+            // already-live remote surfaces.
+            batch.ordered().forEachIndexed { position, view ->
+                if (view.parent == null) row.addView(view, position)
+            }
+            inlineVisible = row.childCount > 0
+            if (inlineVisible) {
+                requestShowSelf(0)
+                refreshStrip(updateVisibility = false)
+            } else if (batch.finished()) refreshStrip()
+        }
+        suggestions.forEachIndexed { index, suggestion ->
             val size = suggestion.info.inlinePresentationSpec.minSize
-            suggestion.inflate(this, android.util.Size(-2, size.height), mainExecutor) { content ->
-                if (generation == inlineGeneration && currentInputStarted && content != null) {
-                    row.addView(content)
-                    inlineVisible = true
-                    requestShowSelf(0)
-                    refreshStrip(updateVisibility = false)
-                }
+            try {
+                suggestion.inflate(this, android.util.Size(-2, size.height), mainExecutor) { content -> accept(index, content) }
+            } catch (_: RuntimeException) {
+                // A failed provider presentation must not crash physical input.
+                accept(index, null)
             }
         }
         return true
@@ -136,7 +153,7 @@ class TitanImeService : InputMethodService() {
     override fun onFinishInput() {
         traceLifecycle("finishInput")
         voice.cancel(); inlineVisible = false
-        panel = ""; inlineGeneration++; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
+        panel = ""; inlineBatch?.cancel(); inlineBatch = null; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
         traceState("finishInput")
         engine?.close()
         engine?.sync()
@@ -171,6 +188,9 @@ class TitanImeService : InputMethodService() {
         if (voice.active) voiceStatus = "画面が閉じられたため中止しました"
         voice.cancel()
         imeWindowVisible = false
+        inlineBatch?.cancel(); inlineBatch = null; inlineVisible = false
+        autofillRow?.removeAllViews()
+        refreshStrip(updateVisibility = false)
         super.onWindowHidden()
         traceLifecycle("windowHidden")
     }
@@ -182,6 +202,7 @@ class TitanImeService : InputMethodService() {
     // A compact input view is used instead of the candidates-only window, which
     // this device clips to the navigation bar when no software input view exists.
     override fun onCreateInputView(): View = LinearLayout(this).apply {
+        inlineBatch?.cancel(); inlineBatch = null; inlineVisible = false
         orientation = LinearLayout.VERTICAL
         setBackgroundColor(android.graphics.Color.WHITE)
         // Some hardware-keyboard devices report zero bottom inset for the IME
@@ -191,7 +212,17 @@ class TitanImeService : InputMethodService() {
             minimumHeight = (48 * resources.displayMetrics.density).toInt()
             candidateRow = LinearLayout(this@TitanImeService).also { addView(it) }
         }
-        addView(scroll, LinearLayout.LayoutParams(-1, -2))
+        val bar = LinearLayout(this@TitanImeService).apply {
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = dp(48)
+            addView(scroll, LinearLayout.LayoutParams(0, -2, 1f))
+            menuButton = panelButton("…") { voice.cancel(); panel = if (panel == "menu") "" else "menu"; renderPanel() }.apply {
+                contentDescription = "入力メニュー"
+                gravity = android.view.Gravity.CENTER
+            }
+            addView(menuButton, LinearLayout.LayoutParams(dp(48), -1))
+        }
+        addView(bar, LinearLayout.LayoutParams(-1, -2))
         autofillRow = LinearLayout(this@TitanImeService)
         addView(HorizontalScrollView(this@TitanImeService).apply { addView(autofillRow) })
         supportPanel = LinearLayout(this@TitanImeService).apply { orientation = LinearLayout.VERTICAL }
@@ -216,7 +247,7 @@ class TitanImeService : InputMethodService() {
         lastCompositionWriteAccepted = false
         traceLifecycle("startInput restarting=$restarting package=${attribute?.packageName} type=${attribute?.inputType} field=${attribute?.fieldId} initialSelection=${attribute?.initialSelStart},${attribute?.initialSelEnd}")
         voice.cancel(); inlineVisible = false
-        panel = ""; inlineGeneration++; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
+        panel = ""; inlineBatch?.cancel(); inlineBatch = null; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
         super.onStartInput(attribute, restarting)
         engine?.setLearning(preferences.learning)
         engine?.start()
@@ -346,59 +377,36 @@ class TitanImeService : InputMethodService() {
     private fun refreshStrip(updateVisibility: Boolean = true) {
         candidateRow?.apply {
             removeAllViews()
-            if (!directField || inlineVisible) addView(panelButton("…") { voice.cancel(); panel = if (panel == "menu") "" else "menu"; renderPanel() })
+            menuButton?.visibility = if (!directField || inlineVisible) View.VISIBLE else View.GONE
             addView(TextView(this@TitanImeService).apply {
-                text = if (engine == null) "Mozc unavailable" else if (!japanese) "英語" else if (output.preedit.hasHighlightedPosition()) "変換" else "予測"
+                text = if (engine == null) "Mozc unavailable" else if (!japanese) "英語" else if (output.preedit.hasHighlightedPosition()) "変換" else "日本語"
                 setTextColor(android.graphics.Color.DKGRAY)
-                setPadding(12, 12, 12, 12)
+                setPadding(dp(8), dp(8), dp(8), dp(8))
             })
             val candidates = CandidatePresentation.candidates(output)
             val focusedId = CandidatePresentation.focusedId(output)
-            if (preedit.isNotEmpty() && !output.preedit.hasHighlightedPosition()) {
-                addView(TextView(this@TitanImeService).apply {
-                    text = "そのまま：$preedit"
-                    setTextColor(android.graphics.Color.DKGRAY)
-                    setPadding(18, 12, 18, 12)
-                    setOnClickListener { currentInputConnection?.let { commitComposition(it) } }
-                })
-            }
-            if (output.preedit.hasHighlightedPosition()) {
-                addView(TextView(this@TitanImeService).apply {
-                    text = "読みに戻す"
-                    setTextColor(android.graphics.Color.BLUE)
-                    setPadding(18, 12, 18, 12)
-                    setOnClickListener {
-                        val ic = currentInputConnection ?: return@setOnClickListener
-                        if (!synchronizeEditor(ic)) return@setOnClickListener
-                        engine?.key(MozcKey.newBuilder().setSpecialKey(MozcKey.SpecialKey.ESCAPE).build())
-                            ?.let { applyOutput(ic, it) }
-                    }
-                })
-                for ((label, key) in listOf("前文節" to MozcKey.SpecialKey.LEFT, "次文節" to MozcKey.SpecialKey.RIGHT)) {
-                    addView(TextView(this@TitanImeService).apply {
-                        text = label
-                        setTextColor(android.graphics.Color.BLUE)
-                        setPadding(18, 12, 18, 12)
-                        setOnClickListener { moveSegment(key) }
-                    })
-                }
-            }
             if (candidates.isEmpty()) addView(TextView(this@TitanImeService).apply {
                 text = preedit
                 textSize = 18f
                 setTextColor(android.graphics.Color.BLACK)
-                setPadding(18, 12, 18, 12)
+                setPadding(dp(12), dp(8), dp(12), dp(8))
             })
             for (candidate in candidates) {
                 addView(TextView(this@TitanImeService).apply {
                     val attributes = output.allCandidateWords.candidatesList.firstOrNull { it.id == candidate.id }?.attributesList.orEmpty()
                     val correction = attributes.any { it.name == "SPELLING_CORRECTION" || it.name == "TYPING_CORRECTION" }
-                    text = (if (focusedId == candidate.id) "● " else "") + candidate.value +
+                    if (focusedId == candidate.id) {
+                        setBackgroundColor(0xffeeeeee.toInt())
+                        setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    }
+                    minimumHeight = dp(48)
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    text = candidate.value +
                         (if (correction) "（訂正）" else "")
                     contentDescription = candidate.value + if (correction) " 訂正候補 ${candidate.annotation.description}" else " 候補"
                     textSize = 18f
                     setTextColor(android.graphics.Color.BLACK)
-                    setPadding(18, 12, 18, 12)
+                    setPadding(dp(12), dp(8), dp(12), dp(8))
                     setOnClickListener {
                         val ic = currentInputConnection ?: return@setOnClickListener
                         if (!synchronizeEditor(ic)) return@setOnClickListener
@@ -407,6 +415,14 @@ class TitanImeService : InputMethodService() {
                             ?: return@setOnClickListener
                         applyOutput(ic, result)
                     }
+                })
+            }
+            if (preedit.isNotEmpty() && !output.preedit.hasHighlightedPosition()) {
+                addView(TextView(this@TitanImeService).apply {
+                    text = "そのまま：$preedit"
+                    setTextColor(android.graphics.Color.DKGRAY)
+                    setPadding(dp(12), dp(8), dp(12), dp(8))
+                    setOnClickListener { currentInputConnection?.let { commitComposition(it) } }
                 })
             }
         }
@@ -420,10 +436,17 @@ class TitanImeService : InputMethodService() {
     }
 
     private fun panelButton(label: String, action: () -> Unit) = TextView(this).apply {
-        text = label; contentDescription = label; textSize = 17f
-        setTextColor(android.graphics.Color.BLACK); setPadding(18, 10, 18, 10)
-        isFocusable = false; setOnClickListener { action() }
+        text = label; textSize = 16f; setTextColor(0xff202124.toInt())
+        contentDescription = label
+        setPadding(dp(12), dp(8), dp(12), dp(8))
+        minimumHeight = dp(48)
+        gravity = android.view.Gravity.CENTER_VERTICAL
+        isClickable = true
+        val value = android.util.TypedValue()
+        if (theme.resolveAttribute(android.R.attr.selectableItemBackground, value, true)) setBackgroundResource(value.resourceId)
+        setOnClickListener { action() }
     }
+
     private fun startVoice() {
         if (directField || !currentInputStarted) return
         if (preedit.isNotEmpty()) { notice("未確定文字列を確定してから音声入力を開始してください"); return }
@@ -496,8 +519,24 @@ class TitanImeService : InputMethodService() {
         val view = supportPanel ?: return
         view.removeAllViews()
         if (panel.isEmpty()) return
-        fun item(label: String, action: () -> Unit) { view.addView(panelButton(label, action)) }
+        var menuRow: LinearLayout? = null
+        fun item(label: String, action: () -> Unit) {
+            val button = panelButton(label, action)
+            if (panel == "menu") {
+                if (menuRow == null || menuRow!!.childCount == 2) {
+                    menuRow = LinearLayout(this).apply { setBackgroundColor(0xfff5f5f5.toInt()) }
+                    view.addView(menuRow)
+                }
+                menuRow!!.addView(button, LinearLayout.LayoutParams(0, -2, 1f))
+            } else view.addView(button)
+        }
         if (panel == "menu") {
+            if (!directField && preedit.isNotEmpty() && !output.preedit.hasHighlightedPosition()) {
+                item("そのまま：$preedit") {
+                    currentInputConnection?.let { commitComposition(it) }
+                    panel = ""; renderPanel()
+                }
+            }
             if (!directField) {
                 item("クリップボード履歴") { openHistory() }
                 item("文字変換") { openTransforms() }
@@ -508,15 +547,15 @@ class TitanImeService : InputMethodService() {
                 val accepted = currentInputConnection?.performContextMenuAction(android.R.id.autofill) == true
                 notice(if (accepted) "入力先へ要求しました。候補の提供はアプリ・自動入力サービスに依存します" else "候補を要求できません。入力先とAndroidの自動入力設定を確認してください")
             }
-            item("Androidの自動入力設定") {
-                val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE)
-                    .setData(android.net.Uri.parse("package:$packageName")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                if (intent.resolveActivity(packageManager) != null) startActivity(intent)
-            }
             item("入力方法を切り替える") { getSystemService(android.view.inputmethod.InputMethodManager::class.java).showInputMethodPicker() }
             if (!directField) {
                 item("Undo") { editorAction(android.R.id.undo) }
                 item("Redo") { editorAction(android.R.id.redo) }
+            }
+            if (!directField && output.preedit.hasHighlightedPosition()) item("読みに戻す") {
+                val ic = currentInputConnection
+                if (ic != null && synchronizeEditor(ic)) engine?.key(MozcKey.newBuilder().setSpecialKey(MozcKey.SpecialKey.ESCAPE).build())?.let { applyOutput(ic, it) }
+                panel = ""; renderPanel()
             }
             item("Titan IME設定") { startActivity(android.content.Intent(this, SettingsActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
         } else if (panel == "voice" && !directField) {
@@ -560,6 +599,10 @@ class TitanImeService : InputMethodService() {
         if (panel.isEmpty()) return false
         if (event.keyCode == KeyEvent.KEYCODE_ESCAPE || event.keyCode == KeyEvent.KEYCODE_BACK) { voice.cancel(); panel = ""; renderPanel(); return true }
         if (directField) return false
+        if (event.isCtrlPressed || event.isAltPressed || event.isMetaPressed) {
+            panel = ""; renderPanel()
+            return false // Preserve existing app shortcut / Titan Alt-text routing.
+        }
         if (panel == "transform") {
             when (EditingBindings.direction(event, fn, true) ?: event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> transformIndex = (transformIndex + 8) % 9

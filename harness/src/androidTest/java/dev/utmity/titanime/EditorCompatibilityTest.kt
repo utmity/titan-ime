@@ -200,7 +200,7 @@ class EditorCompatibilityTest {
         automation.serviceInfo = automation.serviceInfo.apply { flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
         fun click(node: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
             if (node == null) return false
-            if (node.contentDescription?.toString() == "…") return node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+            if (node.contentDescription?.toString() == "入力メニュー") return node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
             return (0 until node.childCount).any { click(node.getChild(it)) }
         }
         try {
@@ -309,6 +309,18 @@ class EditorCompatibilityTest {
             repeat(index) { key(KeyEvent.KEYCODE_J, KeyEvent.META_FUNCTION_ON) }
             key(KeyEvent.KEYCODE_ENTER)
             expect("前" + expected + "😀\n後")
+        }
+    }
+
+    @Test fun transformPanelDoesNotSwallowAppShortcut() {
+        instrumentation.runOnMainSync { activity.editor.setText("Hello"); activity.editor.selectAll(); activity.receivedKeys.clear() }
+        Thread.sleep(150)
+        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON)
+        key(KeyEvent.KEYCODE_Z, KeyEvent.META_CTRL_ON)
+        instrumentation.runOnMainSync {
+            val keys = activity.receivedKeys.filter { it.keyCode == KeyEvent.KEYCODE_Z }
+            assertTrue(keys.any { it.action == KeyEvent.ACTION_DOWN && it.isCtrlPressed })
+            assertTrue(keys.any { it.action == KeyEvent.ACTION_UP })
         }
     }
 }
