@@ -84,54 +84,55 @@ class SettingsActivity : Activity() {
         target = sections.getValue("物理キー")
         text("ショートカット")
         fun shortcutButton(action: String, title: String) {
-            val button = Button(this).apply {
-                fun description() = "$title：${preferences.shortcut(action)?.label() ?: "割り当てなし"}"
-                text = description()
-                setOnClickListener {
-                    var titanFnHeld = false
-                    val hint = TextView(this@SettingsActivity).apply {
-                        text = "割り当てるキーの組み合わせを押してください。通常の文字入力を妨げないよう修飾キーが必要です。"
-                        setPadding(24, 18, 24, 18)
-                        setTextColor(0xff202124.toInt())
-                    }
-                    val dialog = android.app.AlertDialog.Builder(this@SettingsActivity)
-                        .setTitle(title)
-                        .setView(hint)
-                        .setNegativeButton("キャンセル", null)
-                        .apply {
-                            if (action != "language") setNeutralButton("割り当てなし") { _, _ ->
-                                preferences.setShortcut(action, null)
-                                button.text = description()
-                            }
-                        }.create()
-                    dialog.setOnKeyListener { _, code, event ->
-                        if (code == 403 && event.scanCode == 251) {
-                            titanFnHeld = event.action == android.view.KeyEvent.ACTION_DOWN
-                            true
-                        } else if (code == android.view.KeyEvent.KEYCODE_BACK) {
-                            false
-                        } else if (event.action != android.view.KeyEvent.ACTION_DOWN || event.repeatCount != 0) {
-                            true
-                        } else {
-                            val binding = ShortcutBinding.capture(event, titanFnHeld || event.isFunctionPressed)
-                            val reason = when {
-                                binding == null -> "Ctrl・Alt・Fn・Sym・Metaなどと組み合わせてください。"
-                                binding.reserved() -> "この組み合わせは文節操作・カーソル編集用に予約されています。"
-                                else -> preferences.shortcuts().ownerOf(binding, action)?.let {
-                                    "「${when (it) { "language" -> "日英切替"; "history" -> "履歴"; else -> "文字変換" }}」で使用中です。"
-                                }
-                            }
-                            if (reason != null) hint.text = reason
-                            else {
-                                preferences.setShortcut(action, binding)
-                                button.text = description()
-                                dialog.dismiss()
-                            }
-                            true
-                        }
-                    }
-                    dialog.show()
+            val button = Button(this)
+            fun description() = "$title：${preferences.shortcut(action)?.label() ?: "割り当てなし"}"
+            button.text = description()
+            button.setOnClickListener {
+                var titanFnHeld = false
+                val hint = TextView(this@SettingsActivity).apply {
+                    text = "割り当てるキーの組み合わせを押してください。通常の文字入力を妨げないよう修飾キーが必要です。"
+                    setPadding(24, 18, 24, 18)
+                    setTextColor(0xff202124.toInt())
                 }
+                val dialog = android.app.AlertDialog.Builder(this@SettingsActivity)
+                    .setTitle(title)
+                    .setView(hint)
+                    .setNegativeButton("キャンセル", null)
+                    .apply {
+                        if (action != "language") setNeutralButton("割り当てなし") { _, _ ->
+                            preferences.setShortcut(action, null)
+                            button.text = description()
+                            if (::guide.isInitialized) guide.text = guideText()
+                        }
+                    }.create()
+                dialog.setOnKeyListener { _, code, event ->
+                    if (code == 403 && event.scanCode == 251) {
+                        titanFnHeld = event.action == android.view.KeyEvent.ACTION_DOWN
+                        true
+                    } else if (code == android.view.KeyEvent.KEYCODE_BACK) {
+                        false
+                    } else if (event.action != android.view.KeyEvent.ACTION_DOWN || event.repeatCount != 0) {
+                        true
+                    } else {
+                        val binding = ShortcutBinding.capture(event, titanFnHeld || event.isFunctionPressed)
+                        val reason = when {
+                            binding == null -> "Ctrl・Alt・Fn・Sym・Metaなどと組み合わせてください。"
+                            binding.reserved() -> "この組み合わせは文節操作・カーソル編集用に予約されています。"
+                            else -> preferences.shortcuts().ownerOf(binding, action)?.let {
+                                "「${when (it) { "language" -> "日英切替"; "history" -> "履歴"; else -> "文字変換" }}」で使用中です。"
+                            }
+                        }
+                        if (reason != null) hint.text = reason
+                        else {
+                            preferences.setShortcut(action, binding)
+                            button.text = description()
+                            if (::guide.isInitialized) guide.text = guideText()
+                            dialog.dismiss()
+                        }
+                        true
+                    }
+                }
+                dialog.show()
             }
             target.addView(button)
         }
