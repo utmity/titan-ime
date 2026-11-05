@@ -31,7 +31,7 @@ class SettingsActivity : Activity() {
         fun text(value: String) = TextView(this).apply {
             text = value; textSize = 18f; setTextColor(0xff202124.toInt()); target.addView(this)
         }
-        text("Titan IME 設定")
+        text(if (packageName.endsWith(".preview")) "Titan IME Preview 設定" else "Titan IME 設定")
         text("Version 0.1.1-pr2 ・ build 2")
         mode = text("")
         target.addView(Button(this).apply {
