@@ -13,7 +13,20 @@ android {
         versionCode = 2
         versionName = "0.1.1-pr2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["imeAppLabel"] = "Titan IME"
+        manifestPlaceholders["imeSettingsLabel"] = "Titan IME 設定"
 
+    }
+    buildTypes {
+        // A separate package avoids replacing a differently signed installed IME.
+        // Preview has independent settings/dictionary data, and can be removed safely.
+        create("preview") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".preview"
+            versionNameSuffix = "-preview"
+            manifestPlaceholders["imeAppLabel"] = "Titan IME Preview"
+            manifestPlaceholders["imeSettingsLabel"] = "Titan IME Preview 設定"
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
