@@ -17,6 +17,19 @@ import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.KeyEvent as 
 /** Physical routing belongs here; Japanese composition and conversion belong to Mozc. */
 class TitanImeService : InputMethodService() {
     private val preferences by lazy { ImePreferences(this) }
+    private var shortcutProfile = ShortcutProfile(null, null, null)
+    private var toolbarMode = "always"
+    private val rawRomaji = RawRomajiTrace()
+    private var toolbarRow: LinearLayout? = null
+    private var toolbarSpacer: View? = null
+    private val settingsListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key?.startsWith("shortcut_") == true || key in setOf("toggle", "clipboard_key", "transform_key"))
+            shortcutProfile = preferences.shortcuts()
+        if (key == "toolbar_mode") {
+            toolbarMode = preferences.toolbarMode
+            refreshStrip()
+        }
+    }
     private var engine: MozcEngine? = null
     private var japanese = false
     private var directField = false
@@ -85,6 +98,9 @@ class TitanImeService : InputMethodService() {
         super.onCreate()
         clipboard.addPrimaryClipChangedListener(clipListener)
         japanese = preferences.japanese
+        shortcutProfile = preferences.shortcuts()
+        toolbarMode = preferences.toolbarMode
+        preferences.store.registerOnSharedPreferenceChangeListener(settingsListener)
         try { engine = MozcEngine(this) }
         catch (error: Exception) { android.util.Log.e("TitanImeProbe", "Mozc initialization failed", error) }
         catch (error: LinkageError) { android.util.Log.e("TitanImeProbe", "Mozc native library unavailable", error) }
@@ -94,6 +110,7 @@ class TitanImeService : InputMethodService() {
 
     override fun onDestroy() {
         voice.cancel()
+        preferences.store.unregisterOnSharedPreferenceChangeListener(settingsListener)
         clipboard.removePrimaryClipChangedListener(clipListener)
         super.onDestroy()
     }
@@ -162,6 +179,7 @@ class TitanImeService : InputMethodService() {
         traceState("finishInput")
         engine?.close()
         engine?.sync()
+        rawRomaji.invalidate()
         preedit = ""
         compositionStart = -1
         selectedReading = null
@@ -179,7 +197,7 @@ class TitanImeService : InputMethodService() {
         traceLifecycle("startInputView restarting=$restarting")
         super.onStartInputView(info, restarting)
         updateCaptionBar()
-        refreshStrip(updateVisibility = false)
+        refreshStrip()
     }
     override fun onFinishInputView(finishingInput: Boolean) {
         traceLifecycle("finishInputView finishing=$finishingInput")
@@ -195,6 +213,7 @@ class TitanImeService : InputMethodService() {
             imeWindow.decorView.systemUiVisibility = imeWindow.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         }
         traceLifecycle("windowShown")
+        refreshStrip()
     }
     private fun updateCaptionBar() {
         // Android 16 supplies the public custom-switcher callback. Keep older
@@ -270,12 +289,14 @@ class TitanImeService : InputMethodService() {
             }
             addView(menuButton, LinearLayout.LayoutParams(dp(48), -1))
         }
+        toolbarRow = bar
         addView(bar, LinearLayout.LayoutParams(-1, -2))
         autofillRow = LinearLayout(this@TitanImeService)
         addView(HorizontalScrollView(this@TitanImeService).apply { addView(autofillRow) })
         supportPanel = LinearLayout(this@TitanImeService).apply { orientation = LinearLayout.VERTICAL }
         addView(supportPanel, LinearLayout.LayoutParams(-1, -2))
         val spacer = View(this@TitanImeService)
+        toolbarSpacer = spacer
         addView(spacer, LinearLayout.LayoutParams(-1, navigationClearance))
         setOnApplyWindowInsetsListener { _, insets ->
             val bottom = if (android.os.Build.VERSION.SDK_INT >= 30)
@@ -304,6 +325,7 @@ class TitanImeService : InputMethodService() {
         super.onStartInput(attribute, restarting)
         engine?.setLearning(preferences.learning)
         engine?.start()
+        rawRomaji.invalidate()
         preedit = ""
         compositionStart = -1
         selectedReading = null
@@ -324,7 +346,7 @@ class TitanImeService : InputMethodService() {
         traceState("startInput restarting=$restarting type=$type package=${attribute?.packageName} japanese=$japanese")
         // A launcher may keep an invisible text editor focused on its home
         // screen. A connection alone is not a request to show the IME window.
-        refreshStrip(updateVisibility = false)
+        refreshStrip()
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
             attribute?.packageName == "dev.utmity.titanime.harness") {
             sendBroadcast(android.content.Intent("dev.utmity.titanime.INPUT_READY")
@@ -353,6 +375,7 @@ class TitanImeService : InputMethodService() {
         if (snapshot.partialStartOffset >= 0 || !receipt.matchesText(snapshot.text?.toString() ?: "", snapshot.startOffset, snapshot.selectionStart, snapshot.selectionEnd)) return
         if (!ic.setComposingRegion(0, 1)) return
         compositionStart = 0
+        rawRomaji.append(receipt.letter, newComposition = true)
         engine?.key(MozcKey.newBuilder().setKeyCode(receipt.letter.code).build())?.let { applyOutput(ic, it) }
         traceLifecycle("firstKey restoredFromOwnWrite")
     }
@@ -373,6 +396,7 @@ class TitanImeService : InputMethodService() {
             newSelStart != newSelEnd && newSelStart in candidatesStart..candidatesEnd &&
             newSelEnd in candidatesStart..candidatesEnd && !output.preedit.hasHighlightedPosition()) {
             compositionStart = candidatesStart
+            rawRomaji.invalidate()
             selectedReading = minOf(newSelStart, newSelEnd) - candidatesStart to
                 maxOf(newSelStart, newSelEnd) - candidatesStart
             return
@@ -387,6 +411,7 @@ class TitanImeService : InputMethodService() {
             val offset = newSelStart - candidatesStart
             val expected = preedit.offsetByCodePoints(0, output.preedit.cursor.coerceIn(0, preedit.codePointCount(0, preedit.length)))
             if (offset == expected) return
+            rawRomaji.invalidate()
             if (!output.preedit.hasHighlightedPosition()) {
                 engine?.moveCursor(preedit.codePointCount(0, offset))?.let { applyOutput(ic, it) }
             } else {
@@ -411,6 +436,7 @@ class TitanImeService : InputMethodService() {
         // visible text and the editor's selection, then discard only the session state.
         ic.finishComposingText()
         engine?.start()
+        rawRomaji.invalidate()
         preedit = ""
         compositionStart = -1
         selectedReading = null
@@ -428,6 +454,13 @@ class TitanImeService : InputMethodService() {
     }
 
     private fun refreshStrip(updateVisibility: Boolean = true) {
+        val toolbarNeeded = when (toolbarMode) {
+            "compose" -> preedit.isNotEmpty()
+            "conversion" -> output.preedit.hasHighlightedPosition()
+            else -> true
+        } || panel.isNotEmpty() || inlineVisible || voice.active
+        toolbarRow?.visibility = if (toolbarNeeded) View.VISIBLE else View.GONE
+        toolbarSpacer?.visibility = if (toolbarNeeded) View.VISIBLE else View.GONE
         candidateRow?.apply {
             removeAllViews()
             menuButton?.visibility = if (!directField || inlineVisible) View.VISIBLE else View.GONE
@@ -468,6 +501,10 @@ class TitanImeService : InputMethodService() {
                     }
                 })
             }
+            val raw = if (!directField && japanese && preedit.isNotEmpty()) rawRomaji.candidate else null
+            if (raw != null) addView(panelButton("abc: $raw") { commitRawRomaji() }.apply {
+                contentDescription = "入力したローマ字で確定: $raw"
+            })
             if (preedit.isNotEmpty() && !output.preedit.hasHighlightedPosition()) {
                 addView(TextView(this@TitanImeService).apply {
                     text = "そのまま：$preedit"
@@ -490,8 +527,32 @@ class TitanImeService : InputMethodService() {
                 // The input-view flag can remain true after the IME window was
                 // hidden. It is not evidence that candidates are on screen.
                 if (!imeWindowVisible || !isInputViewShown || window?.window?.decorView?.isShown != true) requestShowSelf(0)
-            } else if (directField && !inlineVisible && isInputViewShown) requestHideSelf(0)
+            } else if ((directField && !inlineVisible || !toolbarNeeded && preedit.isEmpty()) && isInputViewShown)
+                requestHideSelf(0)
         }
+    }
+
+    /** Replace the complete composing span without altering Mozc candidate IDs. */
+    private fun commitRawRomaji() {
+        val raw = rawRomaji.candidate ?: return
+        if (!japanese || directField || preedit.isEmpty()) return
+        val ic = currentInputConnection ?: return
+        if (!synchronizeEditor(ic)) return
+        writingBatch = true
+        ic.beginBatchEdit()
+        try {
+            ic.commitText(raw, 1)
+            ic.finishComposingText()
+        } finally { ic.endBatchEdit(); writingBatch = false }
+        engine?.start()
+        rawRomaji.invalidate()
+        preedit = ""
+        compositionStart = -1
+        selectedReading = null
+        output = Output.getDefaultInstance()
+        panel = ""
+        renderPanel()
+        refreshStrip()
     }
 
     private fun panelButton(label: String, action: () -> Unit) = TextView(this).apply {
@@ -672,6 +733,8 @@ class TitanImeService : InputMethodService() {
                 scroll.addView(panelButton((if (index == expandedIndex) "● " else "") + candidate.value) { submitExpanded(index) })
                 view.addView(scroll)
             }
+            if (rawRomaji.candidate != null && preedit.isNotEmpty())
+                item("abc: ${rawRomaji.candidate}") { commitRawRomaji() }
             item("${expandedIndex + 1}/${candidates.size} ・ ${if (preferences.segments == "jk" && output.preedit.hasHighlightedPosition()) "Fn+H/L" else "Fn+K/J"}で選択・Enterで確定") { }
         } else if (panel == "transform" && !directField) {
             SelectionTransforms.labels.forEachIndexed { index, label ->
@@ -747,6 +810,7 @@ class TitanImeService : InputMethodService() {
     private fun deleteSelectedReading(ic: InputConnection) {
         val (start, end) = selectedReading ?: return
         selectedReading = null
+        rawRomaji.invalidate()
         val mozc = engine ?: return
         var result = mozc.moveCursor(preedit.codePointCount(0, end))
         repeat(preedit.codePointCount(start, end)) {
@@ -805,6 +869,7 @@ class TitanImeService : InputMethodService() {
             }
             preedit = next
             output = result
+            if (result.hasResult() || next.isEmpty()) rawRomaji.invalidate()
         } finally { ic.endBatchEdit(); writingBatch = false; traceState("endBatch") }
         refreshStrip()
     }
@@ -825,6 +890,7 @@ class TitanImeService : InputMethodService() {
         if (start < 0 || end > text.length) return true
         if (text.subSequence(start, end).toString() == preedit) return true
         traceState("reset reason=snapshotMismatch finishComposing")
+        rawRomaji.invalidate()
         // Retain the host's authoritative text/selection, discard stale engine
         // candidates, and start the next keystroke as a new composition.
         ic.finishComposingText()
@@ -850,6 +916,7 @@ class TitanImeService : InputMethodService() {
 
     private fun finishForAppKey(ic: InputConnection) {
         if (selectedReading == null) { commitComposition(ic); return }
+        rawRomaji.invalidate()
         // Copy/cut must retain the editor selection rather than collapse it when
         // committing Mozc's result. Preserve the selected visible reading in place.
         ic.finishComposingText()
@@ -881,7 +948,8 @@ class TitanImeService : InputMethodService() {
         val ic = currentInputConnection ?: return super.onKeyDown(keyCode, event)
         traceState("key kind=${when(keyCode) { KeyEvent.KEYCODE_SPACE -> "space"; KeyEvent.KEYCODE_ENTER -> "enter"; else -> "other" }} japanese=$japanese")
         synchronizeEditor(ic)
-        if (preferences.matchesToggle(event, event.isFunctionPressed || event.deviceId in titanFnDevices)) {
+        val fnHeld = event.isFunctionPressed || event.deviceId in titanFnDevices
+        if (!directField && shortcutProfile.language?.matches(event, fnHeld) == true) {
             if (event.repeatCount == 0 && engine != null && !directField) {
                 toggleLanguage()
             }
@@ -891,14 +959,11 @@ class TitanImeService : InputMethodService() {
         // the app; never synthesize an early Up while the physical key is held.
         if (KeyEvent.isModifierKey(keyCode) || isTitanFn(event) || keyCode == KeyEvent.KEYCODE_SYM ||
             keyCode == KeyEvent.KEYCODE_FUNCTION) return super.onKeyDown(keyCode, event)
-        val fnHeld = event.isFunctionPressed || event.deviceId in titanFnDevices
-        if (!directField && fnHeld && !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed && !event.isMetaPressed &&
-            preferences.clipboardKey != "off" && keyCode == (if (preferences.clipboardKey == "b") KeyEvent.KEYCODE_B else KeyEvent.KEYCODE_V)) {
+        if (!directField && shortcutProfile.history?.matches(event, fnHeld) == true) {
             if (event.repeatCount == 0) { if (panel == "history") { panel = ""; renderPanel() } else openHistory() }
             return true
         }
-        if (!directField && fnHeld && !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed && !event.isMetaPressed &&
-            preferences.transformKey != "off" && keyCode == (if (preferences.transformKey == "g") KeyEvent.KEYCODE_G else KeyEvent.KEYCODE_T)) {
+        if (!directField && shortcutProfile.transform?.matches(event, fnHeld) == true) {
             if (event.repeatCount == 0) { if (panel == "transform") { panel = ""; renderPanel() } else openTransforms() }
             return true
         }
@@ -913,6 +978,7 @@ class TitanImeService : InputMethodService() {
         }
         val navigation = EditingBindings.direction(event, fnHeld, preferences.editing, preferences.editingLayout)
         if (navigation != null && !directField && !output.preedit.hasHighlightedPosition()) {
+            rawRomaji.invalidate()
             if (preedit.isNotEmpty() && !event.isCtrlPressed && !event.isShiftPressed &&
                 navigation in listOf(KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT)) {
                 engine?.key(MozcKey.newBuilder().setSpecialKey(if (navigation == KeyEvent.KEYCODE_DPAD_LEFT)
@@ -954,6 +1020,7 @@ class TitanImeService : InputMethodService() {
             }
         }
         if (altText != null) {
+            rawRomaji.invalidate()
             if (japanese && !directField && engine != null && !altText.toChar().isDigit()) {
                 applyOutput(ic, engine!!.key(MozcKey.newBuilder().setKeyCode(altText).build()))
             } else {
@@ -968,6 +1035,7 @@ class TitanImeService : InputMethodService() {
                 character in 33..126 && !character.toChar().isLetterOrDigit()) {
                 // Use the character actually delivered by Android; never invent a
                 // symbol mapping for an Fn/Sym letter whose character is still a letter.
+                rawRomaji.invalidate()
                 val result = engine!!.key(MozcKey.newBuilder().setKeyCode(character).build())
                 applyOutput(ic, result)
                 return result.consumed
@@ -985,6 +1053,7 @@ class TitanImeService : InputMethodService() {
                 return true
             }
             if (preedit.isNotEmpty() && !event.isShiftPressed) {
+                rawRomaji.invalidate()
                 val result = engine!!.key(MozcKey.newBuilder().setSpecialKey(
                     if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) MozcKey.SpecialKey.LEFT else MozcKey.SpecialKey.RIGHT).build())
                 applyOutput(ic, result)
@@ -1003,6 +1072,8 @@ class TitanImeService : InputMethodService() {
         }
         if (special != null) {
             if (preedit.isEmpty()) return super.onKeyDown(keyCode, event)
+            if (keyCode != KeyEvent.KEYCODE_SPACE && keyCode != KeyEvent.KEYCODE_ENTER)
+                rawRomaji.invalidate()
             if (keyCode == KeyEvent.KEYCODE_ENTER) {
                 commitComposition(ic)
                 return true
@@ -1025,6 +1096,7 @@ class TitanImeService : InputMethodService() {
                 val eligible = source != null && source.text?.isEmpty() == true && source.startOffset == 0 &&
                     source.selectionStart == 0 && source.selectionEnd == 0 && source.partialStartOffset < 0
                 initialKeyHandoff = null
+                rawRomaji.append(c, newComposition = preedit.isEmpty())
                 val result = engine!!.key(MozcKey.newBuilder().setKeyCode(c.lowercaseChar().code).build())
                 applyOutput(ic, result)
                 if (eligible && lastCompositionWriteAccepted && result.consumed && !result.hasResult() && preedit == c.toString()) {
