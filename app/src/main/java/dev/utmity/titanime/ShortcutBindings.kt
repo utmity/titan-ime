@@ -39,7 +39,7 @@ internal data class ShortcutBinding(val keyCode: Int, val modifiers: Int) {
         const val ALT = 8
         const val SYM = 16
         const val META = 32
-        private const val ALLOWED = FN or CTRL or SHIFT or ALT or SYM or META
+        private val ALLOWED = FN or CTRL or SHIFT or ALT or SYM or META
 
         fun modifierMask(event: KeyEvent, fnHeld: Boolean): Int {
             var value = 0
