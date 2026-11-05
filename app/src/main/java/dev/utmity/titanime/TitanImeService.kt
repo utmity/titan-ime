@@ -593,9 +593,14 @@ class TitanImeService : InputMethodService() {
     }
     private fun submitExpanded(index: Int) {
         if (directField) return
+        val native = CandidatePresentation.expanded(output)
+        if (index == native.size && rawRomaji.candidate != null && preedit.isNotEmpty()) {
+            commitRawRomaji()
+            return
+        }
         val ic = currentInputConnection ?: return
         if (!synchronizeEditor(ic)) return
-        val candidate = CandidatePresentation.expanded(output).getOrNull(index) ?: return
+        val candidate = native.getOrNull(index) ?: return
         val converted = output.preedit.hasHighlightedPosition()
         panel = ""; renderPanel()
         val result = engine?.command(if (converted) SessionCommand.CommandType.HIGHLIGHT_CANDIDATE else SessionCommand.CommandType.SUBMIT_CANDIDATE, candidate.id) ?: return
@@ -725,17 +730,19 @@ class TitanImeService : InputMethodService() {
             item("キャンセル") { voice.cancel(); panel = ""; renderPanel() }
         } else if (panel == "candidates" && !directField) {
             val candidates = CandidatePresentation.expanded(output)
-            expandedIndex = expandedIndex.coerceIn(0, maxOf(0, candidates.lastIndex))
-            // Three rows at a time; no truncation or max-width changes to candidate text.
-            candidates.drop((expandedIndex / 3) * 3).take(3).forEachIndexed { offset, candidate ->
-                val index = (expandedIndex / 3) * 3 + offset
+            val raw = if (preedit.isNotEmpty()) rawRomaji.candidate else null
+            val total = candidates.size + if (raw == null) 0 else 1
+            expandedIndex = expandedIndex.coerceIn(0, maxOf(0, total - 1))
+            // Native IDs remain untouched. The original romaji is one extra
+            // independently committed row, reachable by physical navigation.
+            val pageStart = (expandedIndex / 3) * 3
+            for (index in pageStart until minOf(pageStart + 3, total)) {
+                val label = if (index < candidates.size) candidates[index].value else "abc: $raw"
                 val scroll = HorizontalScrollView(this)
-                scroll.addView(panelButton((if (index == expandedIndex) "● " else "") + candidate.value) { submitExpanded(index) })
+                scroll.addView(panelButton((if (index == expandedIndex) "● " else "") + label) { submitExpanded(index) })
                 view.addView(scroll)
             }
-            if (rawRomaji.candidate != null && preedit.isNotEmpty())
-                item("abc: ${rawRomaji.candidate}") { commitRawRomaji() }
-            item("${expandedIndex + 1}/${candidates.size} ・ ${if (preferences.segments == "jk" && output.preedit.hasHighlightedPosition()) "Fn+H/L" else "Fn+K/J"}で選択・Enterで確定") { }
+            item("${expandedIndex + 1}/$total ・ ${if (preferences.segments == "jk" && output.preedit.hasHighlightedPosition()) "Fn+H/L" else "Fn+K/J"}で選択・Enterで確定") { }
         } else if (panel == "transform" && !directField) {
             SelectionTransforms.labels.forEachIndexed { index, label ->
                 item((if (index == transformIndex) "▶ " else "") + label) { transformIndex = index; transformSelection() }
@@ -777,7 +784,7 @@ class TitanImeService : InputMethodService() {
             val alternative = preferences.segments == "jk" && output.preedit.hasHighlightedPosition()
             val previous = if (alternative) KeyEvent.KEYCODE_H else KeyEvent.KEYCODE_K
             val next = if (alternative) KeyEvent.KEYCODE_L else KeyEvent.KEYCODE_J
-            val count = CandidatePresentation.expanded(output).size
+            val count = CandidatePresentation.expanded(output).size + if (rawRomaji.candidate != null && preedit.isNotEmpty()) 1 else 0
             if (count == 0) { panel = ""; renderPanel(); return false }
             when {
                 event.keyCode == KeyEvent.KEYCODE_ENTER -> { submitExpanded(expandedIndex); return true }
