@@ -44,6 +44,46 @@ internal class ImePreferences(context: Context) {
     var japanese: Boolean
         get() = store.getBoolean("japanese", false)
         set(value) { store.edit().putBoolean("japanese", value).apply() }
+    var toolbarMode: String
+        get() = store.getString("toolbar_mode", "always") ?: "always"
+        set(value) {
+            require(value in setOf("always", "compose", "conversion"))
+            store.edit().putString("toolbar_mode", value).apply()
+        }
+
+    fun shortcut(action: String): ShortcutBinding? {
+        require(action in setOf("language", "history", "transform"))
+        val saved = store.getString("shortcut_$action", null)
+        if (saved == "off") return null
+        if (saved != null) return ShortcutBinding.decode(saved)
+        // Preserve existing profiles until the user explicitly records a new key.
+        return when (action) {
+            "language" -> when (toggle) {
+                "sym" -> ShortcutBinding(KeyEvent.KEYCODE_SPACE, ShortcutBinding.SYM)
+                "alt" -> ShortcutBinding(KeyEvent.KEYCODE_SPACE, ShortcutBinding.ALT)
+                else -> ShortcutBinding(KeyEvent.KEYCODE_SPACE, ShortcutBinding.FN)
+            }
+            "history" -> when (clipboardKey) {
+                "off" -> null
+                "b" -> ShortcutBinding(KeyEvent.KEYCODE_B, ShortcutBinding.FN)
+                else -> ShortcutBinding(KeyEvent.KEYCODE_V, ShortcutBinding.FN)
+            }
+            else -> when (transformKey) {
+                "off" -> null
+                "g" -> ShortcutBinding(KeyEvent.KEYCODE_G, ShortcutBinding.FN)
+                else -> ShortcutBinding(KeyEvent.KEYCODE_T, ShortcutBinding.FN)
+            }
+        }
+    }
+
+    fun setShortcut(action: String, binding: ShortcutBinding?) {
+        require(action in setOf("language", "history", "transform"))
+        require(binding == null || !binding.reserved())
+        store.edit().putString("shortcut_$action", binding?.encode() ?: "off").apply()
+    }
+
+    fun shortcuts() = ShortcutProfile(shortcut("language"), shortcut("history"), shortcut("transform"))
+
     fun matchesToggle(event: KeyEvent, fn: Boolean): Boolean {
         if (event.keyCode != KeyEvent.KEYCODE_SPACE || event.isShiftPressed || event.isCtrlPressed || event.isMetaPressed) return false
         return when (toggle) {
