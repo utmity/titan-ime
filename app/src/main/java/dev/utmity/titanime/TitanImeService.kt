@@ -523,7 +523,7 @@ class TitanImeService : InputMethodService() {
             renderPanel()
         }
         if (updateVisibility) {
-            if (!directField && (preedit.isNotEmpty() || panel.isNotEmpty())) {
+            if (!directField && toolbarNeeded && (preedit.isNotEmpty() || panel.isNotEmpty() || inlineVisible || voice.active)) {
                 // The input-view flag can remain true after the IME window was
                 // hidden. It is not evidence that candidates are on screen.
                 if (!imeWindowVisible || !isInputViewShown || window?.window?.decorView?.isShown != true) requestShowSelf(0)
@@ -541,15 +541,15 @@ class TitanImeService : InputMethodService() {
         writingBatch = true
         ic.beginBatchEdit()
         try {
-            ic.commitText(raw, 1)
+            if (!ic.commitText(raw, 1)) return
             ic.finishComposingText()
+            engine?.start()
+            rawRomaji.invalidate()
+            preedit = ""
+            compositionStart = -1
+            selectedReading = null
+            output = Output.getDefaultInstance()
         } finally { ic.endBatchEdit(); writingBatch = false }
-        engine?.start()
-        rawRomaji.invalidate()
-        preedit = ""
-        compositionStart = -1
-        selectedReading = null
-        output = Output.getDefaultInstance()
         panel = ""
         renderPanel()
         refreshStrip()
