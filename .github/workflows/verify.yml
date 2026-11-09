@@ -47,7 +47,7 @@ jobs:
         run: >-
           bash gradlew --no-daemon --console=plain
           :app:testDebugUnitTest :app:lintDebug :harness:lintDebug
-          :app:assembleDebug :app:assembleRelease
+          :app:assembleDebug :app:assembleRelease :app:assemblePreview
           :app:assembleDebugAndroidTest
           :harness:assembleDebug :harness:assembleDebugAndroidTest
       - name: Save verification reports
@@ -59,6 +59,45 @@ jobs:
             app/build/reports/
             app/build/test-results/
             harness/build/reports/
+          retention-days: 7
+      - name: Verify install APK identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging "$APK" > /tmp/titan-ime-badging.txt
+          grep -F "name='dev.utmity.titanime'" /tmp/titan-ime-badging.txt
+          grep -F "versionCode='2'" /tmp/titan-ime-badging.txt
+          grep -F "versionName='0.1.1-pr2'" /tmp/titan-ime-badging.txt
+          mkdir -p dist
+          cp "$APK" dist/Titan-IME-0.1.1-pr2-build2.apk
+      - name: Save clearly named install APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: titan-ime-pr2-install-only
+          path: dist/Titan-IME-0.1.1-pr2-build2.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Verify separately installable preview identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/preview/app-preview.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging "$APK" > /tmp/titan-preview-badging.txt
+          grep -F "name='dev.utmity.titanime.preview'" /tmp/titan-preview-badging.txt
+          grep -F "versionCode='2'" /tmp/titan-preview-badging.txt
+          grep -F "versionName='0.1.1-pr2-preview'" /tmp/titan-preview-badging.txt
+          grep -F "application-label:'Titan IME Preview'" /tmp/titan-preview-badging.txt
+          mkdir -p dist
+          cp "$APK" dist/Titan-IME-Preview-0.1.1-pr2.apk
+      - name: Save preview APK without replacing existing IME
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: titan-ime-preview-safe-install
+          path: dist/Titan-IME-Preview-0.1.1-pr2.apk
+          if-no-files-found: error
           retention-days: 7
       - name: Save device-test APKs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
