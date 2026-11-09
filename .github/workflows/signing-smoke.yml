@@ -47,16 +47,20 @@ jobs:
       - name: Generate throwaway test key
         shell: bash
         run: |
-          keytool -genkeypair -keystore "$RUNNER_TEMP/titan-test.keystore" -alias titan-test \
-            -keyalg RSA -keysize 2048 -validity 30 \
-            -storepass titan-test-store -keypass titan-test-key \
+          # Explicit PKCS12 with ONE password for store and key: in PKCS12
+          # a distinct key password is ignored when the key is stored, so
+          # signing with a different TITAN_KEY_PASSWORD would fail to load
+          # the key. The distribution key must follow the same rule.
+          keytool -genkeypair -keystore "$RUNNER_TEMP/titan-test.keystore" -storetype PKCS12 \
+            -alias titan-test -keyalg RSA -keysize 2048 -validity 30 \
+            -storepass titan-test-pass -keypass titan-test-pass \
             -dname "CN=Titan IME signing smoke test"
           echo "TITAN_KEYSTORE_FILE=$RUNNER_TEMP/titan-test.keystore" >> "$GITHUB_ENV"
       - name: First build (versionCode 20001)
         env:
-          TITAN_KEYSTORE_PASSWORD: titan-test-store
+          TITAN_KEYSTORE_PASSWORD: titan-test-pass
           TITAN_KEY_ALIAS: titan-test
-          TITAN_KEY_PASSWORD: titan-test-key
+          TITAN_KEY_PASSWORD: titan-test-pass
           TITAN_VERSION_CODE: "20001"
         run: bash gradlew --no-daemon --console=plain :app:assembleDebug
       - name: Record first signer and versionCode
@@ -70,9 +74,9 @@ jobs:
             app/build/outputs/apk/debug/app-debug.apk | grep -F "versionCode='20001'"
       - name: Second build (versionCode 20002, same test key)
         env:
-          TITAN_KEYSTORE_PASSWORD: titan-test-store
+          TITAN_KEYSTORE_PASSWORD: titan-test-pass
           TITAN_KEY_ALIAS: titan-test
-          TITAN_KEY_PASSWORD: titan-test-key
+          TITAN_KEY_PASSWORD: titan-test-pass
           TITAN_VERSION_CODE: "20002"
         run: bash gradlew --no-daemon --console=plain :app:assembleDebug
       - name: Assert same signer and increased versionCode

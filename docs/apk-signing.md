@@ -67,11 +67,15 @@ versionCode が増えていること**を自動で照合する（＝2つ目の A
 
 ## 初期設定（リポジトリ所有者が一度だけ）
 
-1. 署名鍵を生成する（有効期限は長く取る。Play 配布用ではない個人用 CI 鍵）:
+1. 署名鍵を生成する（有効期限は長く取る。Play 配布用ではない個人用 CI 鍵）。
+   **キーストアと鍵のパスワードは同一にすること** — 標準の PKCS12 では
+   異なる鍵パスワードは保存時に無視され、署名時に鍵を読めず失敗する
+   （smoke テストの鍵もこの規則で作っている）:
 
    ```
-   keytool -genkeypair -v -keystore titan-ime-ci.keystore -alias titan-ime-ci \
-     -keyalg RSA -keysize 2048 -validity 10000
+   keytool -genkeypair -v -keystore titan-ime-ci.keystore -storetype PKCS12 \
+     -alias titan-ime-ci -keyalg RSA -keysize 2048 -validity 10000
+   # storepass と keypass には同じパスワードを入力する
    ```
 
 2. **キーストアファイルとパスワードを安全な場所にバックアップする**
@@ -84,7 +88,7 @@ versionCode が増えていること**を自動で照合する（＝2つ目の A
    ```
    base64 -w0 titan-ime-ci.keystore   # 出力を TITAN_KEYSTORE_BASE64 に
    gh secret set TITAN_KEYSTORE_BASE64
-   gh secret set TITAN_KEYSTORE_PASSWORD
+   gh secret set TITAN_KEYSTORE_PASSWORD   # TITAN_KEY_PASSWORD にも同じ値を登録する
    gh secret set TITAN_KEY_ALIAS
    gh secret set TITAN_KEY_PASSWORD
    ```
@@ -122,19 +126,71 @@ APK でも上書きできない**。アンインストール → 新しい APK �
 | Mozc プロファイル（学習データ） | `no_backup/mozc/` 一式 |
 | （不要）Mozc 辞書データ | `files/mozc-c4b2aef.data` はアセットから再生成される |
 
-手順の骨子（PC に adb がある前提）:
+手順（Windows 前提。**リダイレクトを含むコマンドは必ず `cmd /c` 経由で実行する**）:
 
-1. Titan IME から別の IME に切り替え、`adb shell am force-stop dev.utmity.titanime`
-   でプロセスを止める（書き込み競合を避ける）。
-2. バックアップ:
-   `adb exec-out run-as dev.utmity.titanime tar -cf - shared_prefs no_backup files > titan-ime-backup.tar`
-   （`cache` は含めない。個別ファイルだけでもよい。）
-3. 旧アプリをアンインストールし、配布ワークフローの署名済み APK をインストールする。
-   **まだ Titan IME を有効化・起動しない。**
-4. 復元: `adb shell run-as dev.utmity.titanime tar -xf - < titan-ime-backup.tar`
-   （adb のバージョンにより標準入力のパイプ挙動が違う場合は、上記の対象
-   ファイルを1つずつ `run-as ... sh -c 'cat > <パス>'` で書き戻す。）
-5. Titan IME を有効化し、設定・ユーザー辞書・変換学習が引き継がれているか確認する。
+> Windows PowerShell 5.1 の `>` はネイティブコマンドの出力をテキストとして
+> 処理するため、tar のようなバイナリが破損する。また PowerShell には
+> `<`（入力リダイレクト）が存在しない。そこで、バイナリの入出力はすべて
+> `cmd /c "..."` の中で完結させ、PowerShell 側ではファイル確認とハッシュ
+> 計算だけを行う。`adb.exe` に PATH が通っている前提。
+
+**フェーズ 0: 前提確認（ここで失敗したら移行自体を中止する）**
+
+```powershell
+adb devices                                   # 端末が見えること
+adb shell run-as dev.utmity.titanime ls shared_prefs
+# ↑ ime_settings.xml が見えること（run-as の読み取り経路の確認）
+adb shell "run-as dev.utmity.titanime sh -c 'echo probe > probe.txt'"
+adb shell run-as dev.utmity.titanime cat probe.txt   # "probe" と出れば書き込み経路も可
+adb shell run-as dev.utmity.titanime rm probe.txt
+```
+
+**フェーズ 1: バックアップ**
+
+Titan IME から別の IME に切り替えてから（書き込み競合を避ける）:
+
+```powershell
+adb shell am force-stop dev.utmity.titanime
+cmd /c "adb exec-out run-as dev.utmity.titanime tar -cf - shared_prefs no_backup files > titan-ime-backup.tar"
+```
+
+**フェーズ 2: 検証ゲート（全部通るまでアンインストールに進まない）**
+
+```powershell
+(Get-Item titan-ime-backup.tar).Length        # 0 でないこと
+tar -tf titan-ime-backup.tar                  # エラーなく最後まで読めること
+Get-FileHash titan-ime-backup.tar -Algorithm SHA256   # 値をメモしておく
+```
+
+- `tar -tf` の一覧に必須エントリが含まれていること:
+  `shared_prefs/ime_settings.xml`、`no_backup/mozc/user_dictionary.db`、
+  および `no_backup/mozc/` 配下のプロファイルファイル群。
+- どれか1つでも満たさなければ**アンインストールせず**、フェーズ 1 をやり直す。
+  アンインストールした時点で旧データは消えるため、この検証が唯一の防波堤になる。
+- バックアップファイルは、移行完了を確認するまで別の場所にもコピーして保持する。
+
+**フェーズ 3: 入れ替え**
+
+旧アプリをアンインストールし、配布ワークフローの署名済み APK をインストールする。
+**まだ Titan IME を有効化・起動しない**（アプリが自分の辞書やセッションを
+書き始める前に復元するため）。
+
+**フェーズ 4: 復元と確認**
+
+```powershell
+cmd /c "adb shell run-as dev.utmity.titanime tar -xf - < titan-ime-backup.tar"
+adb shell run-as dev.utmity.titanime ls -l shared_prefs no_backup/mozc
+# ↑ ファイルが存在し、サイズがバックアップ時の内容と整合すること
+```
+
+- 標準入力のパイプがうまく渡らない場合は、PC 側で `tar -xf titan-ime-backup.tar -C restore\`
+  と展開し、対象ファイルを1つずつ
+  `cmd /c "adb shell run-as dev.utmity.titanime sh -c 'cat > shared_prefs/ime_settings.xml' < restore\shared_prefs\ime_settings.xml"`
+  のように書き戻す。
+- 最後に Titan IME を有効化し、設定・ユーザー辞書・変換学習が引き継がれて
+  いるか目視確認する。問題があってもバックアップ tar が残っていれば、
+  新しいインストールに対してフェーズ 4 からやり直せる（旧署名のアプリと
+  そのデータには戻れない）。
 
 見込みと注意:
 
