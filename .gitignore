@@ -4,6 +4,12 @@
 **/build/
 local.properties
 *.iml
+# Signing material must never be committed (see docs/apk-signing.md).
+*.keystore
+*.jks
+*.p12
+*.pfx
+keystore.properties
 test-results/
 build-verification.log
 .local/
