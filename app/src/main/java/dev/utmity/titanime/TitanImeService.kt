@@ -12,6 +12,7 @@ import android.widget.TextView
 import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.Output
 import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.Preedit
 import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.SessionCommand
+import org.mozc.android.inputmethod.japanese.protobuf.ProtoCandidateWindow.CandidateWord
 import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.KeyEvent as MozcKey
 
 /** Physical routing belongs here; Japanese composition and conversion belong to Mozc. */
@@ -40,6 +41,8 @@ class TitanImeService : InputMethodService() {
     private var preedit = ""
     private var output = Output.getDefaultInstance()
     private var candidateRow: LinearLayout? = null
+    private var candidateScroll: HorizontalScrollView? = null
+    private var stripFocusedView: TextView? = null
     // Candidate strip reuse: the row's views are pooled and only rebuilt when
     // the rendered state actually changes (see CandidatePresentation.StripState).
     private var lastStripState: CandidatePresentation.StripState? = null
@@ -65,6 +68,19 @@ class TitanImeService : InputMethodService() {
     private var expandedIndex = 0
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private var supportPanel: LinearLayout? = null
+    // Expanded candidate grid: one reusable ScrollView whose cells are pooled.
+    // The grid is rebuilt only when the candidate set changes; moving the
+    // selection restyles two cells and scrolls the selected row into view.
+    private var candidateGridScroll: android.widget.ScrollView? = null
+    private var candidateGridRows: LinearLayout? = null
+    private val candidateCellPool = mutableListOf<TextView>()
+    private val candidateRowPool = mutableListOf<LinearLayout>()
+    private var candidateGridKey: String? = null
+    private var candidateGridSelected = -1
+    private var candidateCellRippleRes = 0
+    private val candidateCellClickListener = View.OnClickListener { view ->
+        (view.tag as? Int)?.let { submitExpanded(it) }
+    }
     private val voice by lazy { VoiceInput(this) }
     private var voiceStatus = ""
     private var inlineVisible = false
@@ -278,6 +294,14 @@ class TitanImeService : InputMethodService() {
         stripPlaceholderView = null
         stripRawView = null
         stripCommitView = null
+        stripFocusedView = null
+        // The candidate grid views likewise belong to the previous panel.
+        candidateGridScroll = null
+        candidateGridRows = null
+        candidateCellPool.clear()
+        candidateRowPool.clear()
+        candidateGridKey = null
+        candidateGridSelected = -1
         orientation = LinearLayout.VERTICAL
         setBackgroundColor(android.graphics.Color.WHITE)
         // Some hardware-keyboard devices report zero bottom inset for the IME
@@ -285,7 +309,14 @@ class TitanImeService : InputMethodService() {
         val navigationClearance = (32 * resources.displayMetrics.density).toInt()
         val scroll = HorizontalScrollView(this@TitanImeService).apply {
             minimumHeight = (48 * resources.displayMetrics.density).toInt()
-            candidateRow = LinearLayout(this@TitanImeService).also { addView(it) }
+            // A fading edge is the scrollability cue: candidates no longer
+            // look simply cut off at the fixed buttons on the right.
+            setHorizontalFadingEdgeEnabled(true)
+            setFadingEdgeLength(dp(24))
+            candidateScroll = this
+            candidateRow = LinearLayout(this@TitanImeService).apply {
+                setPadding(dp(4), 0, dp(4), 0)
+            }.also { addView(it) }
         }
         val bar = LinearLayout(this@TitanImeService).apply {
             gravity = android.view.Gravity.CENTER_VERTICAL
@@ -503,6 +534,7 @@ class TitanImeService : InputMethodService() {
         if (state != lastStripState) {
             rebuildStrip(state)
             lastStripState = state
+            ensureStripFocusVisible(state)
         }
         if (panel == "candidates") {
             if (preedit.isEmpty()) panel = ""
@@ -527,12 +559,17 @@ class TitanImeService : InputMethodService() {
     private fun rebuildStrip(state: CandidatePresentation.StripState) {
         val row = candidateRow ?: return
         row.removeAllViews()
+        stripFocusedView = null
         val candidates = CandidatePresentation.candidates(output)
         if (candidates.isEmpty()) {
             val placeholder = stripPlaceholderView ?: TextView(this@TitanImeService).apply {
                 textSize = 18f
                 setTextColor(android.graphics.Color.BLACK)
                 setPadding(dp(12), dp(8), dp(12), dp(8))
+                // Same height as a candidate cell so the bar does not change
+                // height when composition starts or ends.
+                minimumHeight = dp(48)
+                gravity = android.view.Gravity.CENTER_VERTICAL
             }.also { stripPlaceholderView = it }
             placeholder.text = state.preedit
             row.addView(placeholder)
@@ -559,6 +596,7 @@ class TitanImeService : InputMethodService() {
             view.text = candidate.value + (if (correction) "（訂正）" else "")
             view.contentDescription = candidate.value +
                 if (correction) " 訂正候補 ${candidate.annotation.description}" else " 候補"
+            if (state.focusedId == candidate.id) stripFocusedView = view
             row.addView(view)
         }
         if (state.raw != null) {
@@ -575,6 +613,138 @@ class TitanImeService : InputMethodService() {
             }.also { stripCommitView = it }
             commitView.text = "そのまま：${state.preedit}"
             row.addView(commitView)
+        }
+    }
+
+    /** Keep the focused candidate inside the strip's viewport. Runs only
+     * after a rebuild (a rendered-state change), never per plain keystroke
+     * beyond that; with no focused candidate a fresh candidate set starts
+     * from the left edge again. */
+    private fun ensureStripFocusVisible(state: CandidatePresentation.StripState) {
+        val scroller = candidateScroll ?: return
+        scroller.post {
+            if (candidateScroll === scroller) {
+                val focused = stripFocusedView
+                if (focused != null && focused.parent === candidateRow) {
+                    val target = CandidateGrid.revealOffset(focused.left, focused.width,
+                        scroller.width, scroller.scrollX, dp(8))
+                    if (target != scroller.scrollX) scroller.smoothScrollTo(target, 0)
+                } else if (state.focusedId == null && scroller.scrollX != 0) {
+                    scroller.scrollTo(0, 0)
+                }
+            }
+        }
+    }
+
+    private fun gridColumns(): Int =
+        CandidateGrid.columnsForWidth((resources.displayMetrics.widthPixels / resources.displayMetrics.density).toInt())
+
+    private fun ensureCandidateGrid(): android.widget.ScrollView {
+        candidateGridScroll?.let { return it }
+        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val scroll = android.widget.ScrollView(this).apply {
+            addView(rows, android.view.ViewGroup.LayoutParams(-1, -2))
+            setVerticalFadingEdgeEnabled(true)
+            setFadingEdgeLength(dp(24))
+        }
+        candidateGridRows = rows
+        candidateGridScroll = scroll
+        return scroll
+    }
+
+    private fun obtainCandidateCell(index: Int): TextView {
+        if (index < candidateCellPool.size) return candidateCellPool[index]
+        if (candidateCellRippleRes == 0) {
+            val value = android.util.TypedValue()
+            if (theme.resolveAttribute(android.R.attr.selectableItemBackground, value, true))
+                candidateCellRippleRes = value.resourceId
+        }
+        val cell = TextView(this).apply {
+            textSize = 16f
+            setTextColor(0xff202124.toInt())
+            gravity = android.view.Gravity.CENTER
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            // Long candidates wrap to a second line inside the fixed-height
+            // cell instead of pushing the grid wider; beyond that, ellipsize.
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setOnClickListener(candidateCellClickListener)
+        }
+        candidateCellPool += cell
+        return cell
+    }
+
+    private fun styleCandidateCell(cell: TextView, selected: Boolean) {
+        if (selected) {
+            cell.setBackgroundColor(0xffeeeeee.toInt())
+            cell.setTypeface(cell.typeface, android.graphics.Typeface.BOLD)
+        } else {
+            if (candidateCellRippleRes != 0) cell.setBackgroundResource(candidateCellRippleRes)
+            else cell.background = null
+            cell.setTypeface(null, android.graphics.Typeface.NORMAL)
+        }
+    }
+
+    /** Assemble the grid for the current candidate set. Rebuilt only when
+     * the set (ids, values, raw row, column count) actually changes, so
+     * selection movement and ordinary panel re-renders never regenerate
+     * views — even for 169 candidates the cells are created once and pooled. */
+    private fun buildCandidateGrid(candidates: List<CandidateWord>, raw: String?, total: Int) {
+        val rows = candidateGridRows ?: return
+        val columns = gridColumns()
+        val key = buildString {
+            append(columns); append('|'); append(raw ?: "")
+            for (candidate in candidates) { append('|'); append(candidate.id); append(':'); append(candidate.value) }
+        }
+        if (key == candidateGridKey) return
+        candidateGridKey = key
+        candidateGridSelected = -1
+        // Detach every pooled cell and row first so both can be re-parented.
+        for (rowLayout in candidateRowPool) rowLayout.removeAllViews()
+        rows.removeAllViews()
+        var cellIndex = 0
+        for (r in 0 until CandidateGrid.rowsFor(total, columns)) {
+            val rowLayout = if (r < candidateRowPool.size) candidateRowPool[r]
+                else LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                    .also { candidateRowPool += it }
+            for (col in 0 until columns) {
+                val index = r * columns + col
+                if (index >= total) {
+                    // Keep the last row's columns aligned with the rows above.
+                    rowLayout.addView(View(this@TitanImeService), LinearLayout.LayoutParams(0, dp(52), 1f))
+                    continue
+                }
+                val cell = obtainCandidateCell(cellIndex++)
+                cell.tag = index
+                if (index < candidates.size) {
+                    cell.text = candidates[index].value
+                    cell.contentDescription = candidates[index].value + " 候補"
+                } else {
+                    cell.text = "abc: $raw"
+                    cell.contentDescription = "入力したローマ字で確定: $raw"
+                }
+                styleCandidateCell(cell, false)
+                rowLayout.addView(cell, LinearLayout.LayoutParams(0, dp(52), 1f))
+            }
+            rows.addView(rowLayout, LinearLayout.LayoutParams(-1, -2))
+        }
+    }
+
+    /** Restyle the previously selected and newly selected cells (two views,
+     * not a rebuild) and scroll the selected row into the grid's viewport. */
+    private fun updateCandidateGridSelection() {
+        candidateCellPool.getOrNull(candidateGridSelected)?.let { styleCandidateCell(it, false) }
+        candidateCellPool.getOrNull(expandedIndex)?.let { styleCandidateCell(it, true) }
+        candidateGridSelected = expandedIndex
+        val scroll = candidateGridScroll ?: return
+        val rows = candidateGridRows ?: return
+        val rowView = rows.getChildAt(CandidateGrid.rowOf(expandedIndex, gridColumns())) ?: return
+        scroll.post {
+            if (candidateGridScroll === scroll) {
+                val target = CandidateGrid.revealOffset(rowView.top, rowView.height,
+                    scroll.height, scroll.scrollY, dp(4))
+                if (target != scroll.scrollY) scroll.smoothScrollTo(0, target)
+            }
         }
     }
 
@@ -780,14 +950,14 @@ class TitanImeService : InputMethodService() {
             val total = candidates.size + if (raw == null) 0 else 1
             expandedIndex = expandedIndex.coerceIn(0, maxOf(0, total - 1))
             // Native IDs remain untouched. The original romaji is one extra
-            // independently committed row, reachable by physical navigation.
-            val pageStart = (expandedIndex / 3) * 3
-            for (index in pageStart until minOf(pageStart + 3, total)) {
-                val label = if (index < candidates.size) candidates[index].value else "abc: $raw"
-                val scroll = HorizontalScrollView(this)
-                scroll.addView(panelButton((if (index == expandedIndex) "● " else "") + label) { submitExpanded(index) })
-                view.addView(scroll)
-            }
+            // independently committed cell, reachable by physical navigation.
+            // The grid shows 3 rows (9–12 cells) in a fixed-height scroller;
+            // every candidate stays reachable by vertical scrolling or by
+            // tapping its cell directly.
+            val gridScroll = ensureCandidateGrid()
+            buildCandidateGrid(candidates, raw, total)
+            view.addView(gridScroll, LinearLayout.LayoutParams(-1, dp(168)))
+            updateCandidateGridSelection()
             item("${expandedIndex + 1}/$total ・ ${if (preferences.segments == "jk" && output.preedit.hasHighlightedPosition()) "Fn+H/L" else "Fn+K/J"}で選択・Enterで確定") { }
         } else if (panel == "transform" && !directField) {
             SelectionTransforms.labels.forEachIndexed { index, label ->
