@@ -27,21 +27,6 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d # v4
-      - name: Prepare CI version code and restore signing key
-        shell: bash
-        env:
-          TITAN_KEYSTORE_BASE64: ${{ secrets.TITAN_KEYSTORE_BASE64 }}
-        run: |
-          # Monotonic across runs of this workflow, so a newer CI APK never
-          # looks like a downgrade; the base stays above the pinned dev code.
-          echo "TITAN_VERSION_CODE=$((10000 + ${{ github.run_number }}))" >> "$GITHUB_ENV"
-          if [ -n "$TITAN_KEYSTORE_BASE64" ]; then
-            echo "$TITAN_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/titan-ime-ci.keystore"
-            echo "TITAN_KEYSTORE_FILE=$RUNNER_TEMP/titan-ime-ci.keystore" >> "$GITHUB_ENV"
-            echo "Stable CI signing key restored from repository secrets."
-          else
-            echo "::warning::TITAN_KEYSTORE_BASE64 is not set. This build falls back to the ephemeral per-runner debug key, so its APKs cannot update an existing install. See docs/apk-signing.md."
-          fi
       - name: Install required Android SDK packages
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
         with:
@@ -59,11 +44,6 @@ jobs:
         shell: pwsh
         run: ./scripts/import-mozc.ps1 -Source .local/mozc-dist
       - name: Verify and build (no device connected)
-        env:
-          # Key passwords reach only this Gradle step, never the job env.
-          TITAN_KEYSTORE_PASSWORD: ${{ secrets.TITAN_KEYSTORE_PASSWORD }}
-          TITAN_KEY_ALIAS: ${{ secrets.TITAN_KEY_ALIAS }}
-          TITAN_KEY_PASSWORD: ${{ secrets.TITAN_KEY_PASSWORD }}
         run: >-
           bash gradlew --no-daemon --console=plain
           :app:testDebugUnitTest :app:lintDebug :harness:lintDebug
@@ -88,17 +68,15 @@ jobs:
           test -s "$APK"
           "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging "$APK" > /tmp/titan-ime-badging.txt
           grep -F "name='dev.utmity.titanime'" /tmp/titan-ime-badging.txt
+          grep -F "versionCode='2'" /tmp/titan-ime-badging.txt
           grep -F "versionName='0.1.1-pr2'" /tmp/titan-ime-badging.txt
-          VC=$(sed -n "s/.*versionCode='\([0-9][0-9]*\)'.*/\1/p" /tmp/titan-ime-badging.txt | head -1)
-          test -n "$VC"
-          echo "Install APK versionCode: $VC"
           mkdir -p dist
-          cp "$APK" "dist/Titan-IME-0.1.1-pr2-build${VC}.apk"
+          cp "$APK" dist/Titan-IME-0.1.1-pr2-build2.apk
       - name: Save clearly named install APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: titan-ime-pr2-install-only
-          path: dist/Titan-IME-0.1.1-pr2-build*.apk
+          path: dist/Titan-IME-0.1.1-pr2-build2.apk
           if-no-files-found: error
           retention-days: 7
       - name: Verify separately installable preview identity
@@ -109,6 +87,7 @@ jobs:
           test -s "$APK"
           "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging "$APK" > /tmp/titan-preview-badging.txt
           grep -F "name='dev.utmity.titanime.preview'" /tmp/titan-preview-badging.txt
+          grep -F "versionCode='2'" /tmp/titan-preview-badging.txt
           grep -F "versionName='0.1.1-pr2-preview'" /tmp/titan-preview-badging.txt
           grep -F "application-label:'Titan IME Preview'" /tmp/titan-preview-badging.txt
           mkdir -p dist

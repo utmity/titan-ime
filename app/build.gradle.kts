@@ -4,14 +4,15 @@ plugins {
     id("com.google.protobuf") version "0.9.4"
 }
 
-// CI versioning and signing (see docs/apk-signing.md). GitHub Actions
-// restores these from repository secrets; when present, every CI build
-// shares one stable signing key and a monotonically increasing
-// versionCode, so a CI APK can update an existing install in place.
-// Without them (local development), builds keep the pinned development
-// versionCode and the standard per-machine Android debug key — which is
-// exactly why CI APKs built without the secrets can never update each
-// other: each ephemeral runner generates a different debug key.
+// CI versioning and signing (see docs/apk-signing.md). The distribution
+// workflow (dist-apk.yml, main only) restores these from repository
+// secrets; when present, the build uses one stable signing key and the
+// distribution versionCode, so its APK can update an existing install.
+// Verification builds (verify.yml, including pull requests) never
+// receive them: they keep the pinned development versionCode and the
+// standard per-machine Android debug key — which is exactly why APKs
+// signed with a runner-generated debug key can never update each other:
+// each ephemeral runner generates a different one.
 val ciVersionCode = System.getenv("TITAN_VERSION_CODE")?.toIntOrNull()
 val ciKeystoreFile = System.getenv("TITAN_KEYSTORE_FILE")
 android {
