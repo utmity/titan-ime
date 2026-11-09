@@ -1,0 +1,92 @@
+name: Signing smoke test
+
+# Proves the stable-signing path end to end WITHOUT the real signing key
+# and without any repository secret: this job generates a throwaway
+# keystore inside the runner, builds the install APK twice with
+# increasing TITAN_VERSION_CODE values, and asserts that both builds
+# carry the same signer certificate and increasing versionCodes — the
+# exact conditions Android requires for an in-place update.
+# The test passwords below protect only this discarded key.
+# Manual dispatch only; never runs automatically.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Two builds, one signer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d # v4
+      - name: Install required Android SDK packages
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
+        with:
+          packages: 'platform-tools platforms;android-35 platforms;android-36 build-tools;34.0.0'
+      - name: Restore pinned Mozc build
+        id: mozc-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .local/mozc-dist
+          key: mozc-arm64-${{ runner.os }}-${{ hashFiles('scripts/build-mozc.sh') }}
+      - name: Build Mozc on Linux
+        if: steps.mozc-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-mozc.sh
+      - name: Package engine and dictionary
+        shell: pwsh
+        run: ./scripts/import-mozc.ps1 -Source .local/mozc-dist
+      - name: Generate throwaway test key
+        shell: bash
+        run: |
+          # Explicit PKCS12 with ONE password for store and key: in PKCS12
+          # a distinct key password is ignored when the key is stored, so
+          # signing with a different TITAN_KEY_PASSWORD would fail to load
+          # the key. The distribution key must follow the same rule.
+          keytool -genkeypair -keystore "$RUNNER_TEMP/titan-test.keystore" -storetype PKCS12 \
+            -alias titan-test -keyalg RSA -keysize 2048 -validity 30 \
+            -storepass titan-test-pass -keypass titan-test-pass \
+            -dname "CN=Titan IME signing smoke test"
+          echo "TITAN_KEYSTORE_FILE=$RUNNER_TEMP/titan-test.keystore" >> "$GITHUB_ENV"
+      - name: First build (versionCode 20001)
+        env:
+          TITAN_KEYSTORE_PASSWORD: titan-test-pass
+          TITAN_KEY_ALIAS: titan-test
+          TITAN_KEY_PASSWORD: titan-test-pass
+          TITAN_VERSION_CODE: "20001"
+        run: bash gradlew --no-daemon --console=plain :app:assembleDebug
+      - name: Record first signer and versionCode
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs \
+            app/build/outputs/apk/debug/app-debug.apk | grep -i "certificate SHA-256" > /tmp/cert-first.txt
+          cat /tmp/cert-first.txt
+          "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging \
+            app/build/outputs/apk/debug/app-debug.apk | grep -F "versionCode='20001'"
+      - name: Second build (versionCode 20002, same test key)
+        env:
+          TITAN_KEYSTORE_PASSWORD: titan-test-pass
+          TITAN_KEY_ALIAS: titan-test
+          TITAN_KEY_PASSWORD: titan-test-pass
+          TITAN_VERSION_CODE: "20002"
+        run: bash gradlew --no-daemon --console=plain :app:assembleDebug
+      - name: Assert same signer and increased versionCode
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs \
+            app/build/outputs/apk/debug/app-debug.apk | grep -i "certificate SHA-256" > /tmp/cert-second.txt
+          cat /tmp/cert-second.txt
+          diff /tmp/cert-first.txt /tmp/cert-second.txt
+          "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging \
+            app/build/outputs/apk/debug/app-debug.apk | grep -F "versionCode='20002'"
+          echo "PASS: identical signer with a higher versionCode — the second APK can update the first in place."

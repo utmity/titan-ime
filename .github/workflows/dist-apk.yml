@@ -1,0 +1,119 @@
+name: Distribution APK
+
+# The ONLY workflow that produces updatable, stably signed APKs.
+# It runs exclusively on reviewed code: pushes to main, or a manual
+# dispatch — and the job additionally refuses to run on any other ref.
+# Verification builds (verify.yml, including every pull request) never
+# receive the signing secrets and keep the ephemeral per-runner debug
+# key; their APKs are for trying changes, not for updating an install.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dist-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  android:
+    name: Signed distribution build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          # Full history: the distribution versionCode is derived from the
+          # commit count (see the versioning step below).
+          fetch-depth: 0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d # v4
+      - name: Install required Android SDK packages
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
+        with:
+          packages: 'platform-tools platforms;android-35 platforms;android-36 build-tools;34.0.0'
+      - name: Restore pinned Mozc build
+        id: mozc-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .local/mozc-dist
+          key: mozc-arm64-${{ runner.os }}-${{ hashFiles('scripts/build-mozc.sh') }}
+      - name: Build Mozc on Linux
+        if: steps.mozc-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-mozc.sh
+      - name: Package engine and dictionary
+        shell: pwsh
+        run: ./scripts/import-mozc.ps1 -Source .local/mozc-dist
+      - name: Require signing key and compute the distribution versionCode
+        shell: bash
+        env:
+          TITAN_KEYSTORE_BASE64: ${{ secrets.TITAN_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TITAN_KEYSTORE_BASE64" ]; then
+            echo "::error::TITAN_KEYSTORE_BASE64 is not set. Distribution builds refuse the ephemeral per-runner debug key, because its APKs could never update an install. Register the signing secrets first (docs/apk-signing.md)."
+            exit 1
+          fi
+          echo "$TITAN_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/titan-ime-ci.keystore"
+          echo "TITAN_KEYSTORE_FILE=$RUNNER_TEMP/titan-ime-ci.keystore" >> "$GITHUB_ENV"
+          # The single numbering source for every distributable APK:
+          # 10000 + the number of commits on main. It grows monotonically
+          # with history, is identical no matter which workflow or run
+          # builds the APK, and survives workflow edits — unlike per-
+          # workflow run counters, which are independent of each other.
+          # (Rewriting main's history would break monotonicity.)
+          VC=$((10000 + $(git rev-list --count HEAD)))
+          echo "TITAN_VERSION_CODE=$VC" >> "$GITHUB_ENV"
+          echo "Distribution versionCode: $VC"
+      - name: Build signed APKs
+        env:
+          # Key passwords reach only this Gradle step.
+          TITAN_KEYSTORE_PASSWORD: ${{ secrets.TITAN_KEYSTORE_PASSWORD }}
+          TITAN_KEY_ALIAS: ${{ secrets.TITAN_KEY_ALIAS }}
+          TITAN_KEY_PASSWORD: ${{ secrets.TITAN_KEY_PASSWORD }}
+        run: >-
+          bash gradlew --no-daemon --console=plain
+          :app:assembleDebug :app:assemblePreview
+      - name: Verify distribution identity and signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAPT="$ANDROID_HOME/build-tools/34.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$AAPT" dump badging "$APK" > /tmp/dist-badging.txt
+          grep -F "name='dev.utmity.titanime'" /tmp/dist-badging.txt
+          grep -F "versionCode='$TITAN_VERSION_CODE'" /tmp/dist-badging.txt
+          grep -F "versionName='0.1.1-pr2'" /tmp/dist-badging.txt
+          "$APKSIGNER" verify --print-certs "$APK" | grep -i "certificate SHA-256"
+          mkdir -p dist
+          cp "$APK" "dist/Titan-IME-0.1.1-pr2-build${TITAN_VERSION_CODE}.apk"
+          PREVIEW=app/build/outputs/apk/preview/app-preview.apk
+          test -s "$PREVIEW"
+          "$AAPT" dump badging "$PREVIEW" > /tmp/dist-preview-badging.txt
+          grep -F "name='dev.utmity.titanime.preview'" /tmp/dist-preview-badging.txt
+          grep -F "versionCode='$TITAN_VERSION_CODE'" /tmp/dist-preview-badging.txt
+          cp "$PREVIEW" dist/Titan-IME-Preview-0.1.1-pr2.apk
+      - name: Save signed install APK (updatable line)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: titan-ime-install-signed
+          path: dist/Titan-IME-0.1.1-pr2-build*.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Save signed preview APK (updatable line)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: titan-ime-preview-signed
+          path: dist/Titan-IME-Preview-0.1.1-pr2.apk
+          if-no-files-found: error
+          retention-days: 7
