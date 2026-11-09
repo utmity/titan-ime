@@ -42,7 +42,17 @@ internal class ImePreferences(context: Context) {
     // reference to listeners, so registration alone would not keep it alive.
     private val cacheListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         onStoreChanged(key)
+        // Notify only after the snapshot above has absorbed the change, so a
+        // consumer reacting here can never read a stale cached value. This is
+        // the single ordering guarantee for settings propagation: consumers
+        // must use this callback instead of registering their own store
+        // listener, whose invocation order relative to this one is undefined.
+        changeListener?.invoke(key)
     }
+
+    /** Called with the changed key (null after a clear) once the in-memory
+     * snapshot already reflects it. */
+    var changeListener: ((String?) -> Unit)? = null
 
     init {
         store.registerOnSharedPreferenceChangeListener(cacheListener)

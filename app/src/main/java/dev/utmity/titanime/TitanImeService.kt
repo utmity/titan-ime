@@ -17,46 +17,20 @@ import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.KeyEvent as 
 /** Physical routing belongs here; Japanese composition and conversion belong to Mozc. */
 class TitanImeService : InputMethodService() {
     private val preferences by lazy { ImePreferences(this) }
+    // Derived from ImePreferences, the single settings cache. Recomputed only
+    // inside its change callback, which runs after the snapshot is updated,
+    // so this can never be rebuilt from stale values. Every other setting is
+    // read straight from ImePreferences at the point of use (a field read,
+    // not a store access), keeping exactly one cache in the process.
     private var shortcutProfile = ShortcutProfile(null, null, null)
-    private var toolbarMode = "always"
-    // Hot-path settings, mirrored from ImePreferences so a plain keystroke
-    // never touches SharedPreferences. Refreshed by settingsListener.
-    private var prefEditing = true
-    private var prefEditingLayout = "hjkl"
-    private var prefAltText = true
-    private var prefWordDelete = false
-    private var prefSegments = "hl"
     private val rawRomaji = RawRomajiTrace()
     private var toolbarRow: LinearLayout? = null
     private var toolbarSpacer: View? = null
-    private fun loadCachedPreferences() {
-        shortcutProfile = preferences.shortcuts()
-        toolbarMode = preferences.toolbarMode
-        prefEditing = preferences.editing
-        prefEditingLayout = preferences.editingLayout
-        prefAltText = preferences.altText
-        prefWordDelete = preferences.wordDelete
-        prefSegments = preferences.segments
-    }
-    private val settingsListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == null) {
-            loadCachedPreferences()
-            refreshStrip()
-        } else {
-            if (key.startsWith("shortcut_") || key in setOf("toggle", "clipboard_key", "transform_key"))
-                shortcutProfile = preferences.shortcuts()
-            when (key) {
-                "toolbar_mode" -> {
-                    toolbarMode = preferences.toolbarMode
-                    refreshStrip()
-                }
-                "editing" -> prefEditing = preferences.editing
-                "editing_layout" -> prefEditingLayout = preferences.editingLayout
-                "alt_text" -> prefAltText = preferences.altText
-                "word_delete" -> prefWordDelete = preferences.wordDelete
-                "segments" -> prefSegments = preferences.segments
-            }
-        }
+    private fun onPreferencesChanged(key: String?) {
+        if (key == null || key.startsWith("shortcut_") ||
+            key in setOf("toggle", "clipboard_key", "transform_key"))
+            shortcutProfile = preferences.shortcuts()
+        if (key == null || key == "toolbar_mode") refreshStrip()
     }
     private var engine: MozcEngine? = null
     private var japanese = false
@@ -120,13 +94,6 @@ class TitanImeService : InputMethodService() {
     private var traceRevision = 0L
     private var writingBatch = false
     private var inputGeneration = 0L
-    // Editor-signalled changes (selection updates, input start/finish) bump
-    // this epoch. synchronizeEditor may only reuse a verification while the
-    // epoch is unchanged; see synchronizeEditor for the exact contract.
-    private var editorEpoch = 0L
-    private var verifiedSyncEpoch = -1L
-    private var verifiedSyncPreedit: String? = null
-    private var verifiedSyncStart = -1
     private var imeWindowVisible = false
     private var lastCompositionWriteAccepted = false
     private var initialKeyHandoff: InitialKeyHandoff? = null
@@ -158,8 +125,8 @@ class TitanImeService : InputMethodService() {
         super.onCreate()
         clipboard.addPrimaryClipChangedListener(clipListener)
         japanese = preferences.japanese
-        loadCachedPreferences()
-        preferences.store.registerOnSharedPreferenceChangeListener(settingsListener)
+        shortcutProfile = preferences.shortcuts()
+        preferences.changeListener = { key -> onPreferencesChanged(key) }
         try { engine = MozcEngine(this) }
         catch (error: Exception) { android.util.Log.e("TitanImeProbe", "Mozc initialization failed", error) }
         catch (error: LinkageError) { android.util.Log.e("TitanImeProbe", "Mozc native library unavailable", error) }
@@ -169,7 +136,7 @@ class TitanImeService : InputMethodService() {
 
     override fun onDestroy() {
         voice.cancel()
-        preferences.store.unregisterOnSharedPreferenceChangeListener(settingsListener)
+        preferences.changeListener = null
         clipboard.removePrimaryClipChangedListener(clipListener)
         super.onDestroy()
     }
@@ -232,7 +199,6 @@ class TitanImeService : InputMethodService() {
     }
 
     override fun onFinishInput() {
-        editorEpoch++
         traceLifecycle { "finishInput" }
         voice.cancel(); inlineVisible = false
         panel = ""; inlineBatch?.cancel(); inlineBatch = null; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
@@ -384,7 +350,6 @@ class TitanImeService : InputMethodService() {
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         inputGeneration++
-        editorEpoch++
         lastCompositionWriteAccepted = false
         traceLifecycle { "startInput restarting=$restarting package=${attribute?.packageName} type=${attribute?.inputType} field=${attribute?.fieldId} initialSelection=${attribute?.initialSelStart},${attribute?.initialSelEnd}" }
         voice.cancel(); inlineVisible = false
@@ -450,7 +415,6 @@ class TitanImeService : InputMethodService() {
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int,
         newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
-        editorEpoch++
         if (voice.active && (oldSelStart != newSelStart || oldSelEnd != newSelEnd)) { voice.cancel(); voiceStatus = "カーソル移動で中止しました"; renderPanel() }
         traceState { "selection old=$oldSelStart,$oldSelEnd new=$newSelStart,$newSelEnd composing=$candidatesStart,$candidatesEnd" }
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
@@ -522,7 +486,7 @@ class TitanImeService : InputMethodService() {
     }
 
     private fun refreshStrip(updateVisibility: Boolean = true) {
-        val toolbarNeeded = when (toolbarMode) {
+        val toolbarNeeded = when (preferences.toolbarMode) {
             "compose" -> preedit.isNotEmpty()
             "conversion" -> output.preedit.hasHighlightedPosition()
             else -> true
@@ -824,7 +788,7 @@ class TitanImeService : InputMethodService() {
                 scroll.addView(panelButton((if (index == expandedIndex) "● " else "") + label) { submitExpanded(index) })
                 view.addView(scroll)
             }
-            item("${expandedIndex + 1}/$total ・ ${if (prefSegments == "jk" && output.preedit.hasHighlightedPosition()) "Fn+H/L" else "Fn+K/J"}で選択・Enterで確定") { }
+            item("${expandedIndex + 1}/$total ・ ${if (preferences.segments == "jk" && output.preedit.hasHighlightedPosition()) "Fn+H/L" else "Fn+K/J"}で選択・Enterで確定") { }
         } else if (panel == "transform" && !directField) {
             SelectionTransforms.labels.forEachIndexed { index, label ->
                 item((if (index == transformIndex) "▶ " else "") + label) { transformIndex = index; transformSelection() }
@@ -863,7 +827,7 @@ class TitanImeService : InputMethodService() {
             return false // Preserve existing app shortcut / Titan Alt-text routing.
         }
         if (panel == "candidates") {
-            val alternative = prefSegments == "jk" && output.preedit.hasHighlightedPosition()
+            val alternative = preferences.segments == "jk" && output.preedit.hasHighlightedPosition()
             val previous = if (alternative) KeyEvent.KEYCODE_H else KeyEvent.KEYCODE_K
             val next = if (alternative) KeyEvent.KEYCODE_L else KeyEvent.KEYCODE_J
             val count = CandidatePresentation.expanded(output).size + if (rawRomaji.candidate != null && preedit.isNotEmpty()) 1 else 0
@@ -960,16 +924,6 @@ class TitanImeService : InputMethodService() {
             output = result
             if (result.hasResult() || next.isEmpty()) rawRomaji.invalidate()
         } finally { ic.endBatchEdit(); writingBatch = false; traceState { "endBatch" } }
-        // This write is the newest known editor state. Until the editor
-        // signals a change (editorEpoch bump), synchronizeEditor may trust
-        // it instead of re-reading the full text on the next keystroke.
-        // A composing write the editor rejected proves nothing, so it never
-        // counts as verification.
-        if (preedit.isEmpty() || lastCompositionWriteAccepted) {
-            verifiedSyncEpoch = editorEpoch
-            verifiedSyncPreedit = preedit
-            verifiedSyncStart = compositionStart
-        } else verifiedSyncPreedit = null
         refreshStrip()
     }
 
@@ -981,33 +935,14 @@ class TitanImeService : InputMethodService() {
         // An intermediate snapshot is not evidence of external normalization.
         if (writingBatch) return true
         if (preedit.isEmpty() || compositionStart < 0) return true
-        // Reuse the last full verification only while nothing editor-signalled
-        // has happened since: onUpdateSelection, onStartInput and onFinishInput
-        // all bump editorEpoch, so any change the editor reported forces a
-        // fresh snapshot below. This removes the duplicate full-text reads
-        // within one keystroke (handleKey entry plus commitComposition /
-        // moveSegment re-entry) and across a fast typing burst where our own
-        // applyOutput was the last writer and no selection callback has been
-        // delivered yet. The snapshot comparison itself — including treating
-        // missing or partial snapshots as unknown, never as a mismatch — is
-        // unchanged, so the ChatGPT premature-commit fix keeps its behaviour
-        // whenever the editor has signalled anything at all.
-        if (verifiedSyncEpoch == editorEpoch && verifiedSyncPreedit == preedit &&
-            verifiedSyncStart == compositionStart) return true
         val snapshot = ic.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0) ?: return true
         val text = snapshot.text ?: return true
         val start = compositionStart - snapshot.startOffset
         val end = start + preedit.length
         traceState { "snapshot length=${text.length} offset=${snapshot.startOffset} selection=${snapshot.selectionStart},${snapshot.selectionEnd} range=$start,$end match=${start >= 0 && end <= text.length && text.subSequence(start, end).toString() == preedit}" }
         if (start < 0 || end > text.length) return true
-        if (text.subSequence(start, end).toString() == preedit) {
-            verifiedSyncEpoch = editorEpoch
-            verifiedSyncPreedit = preedit
-            verifiedSyncStart = compositionStart
-            return true
-        }
+        if (text.subSequence(start, end).toString() == preedit) return true
         traceState { "reset reason=snapshotMismatch finishComposing" }
-        verifiedSyncPreedit = null
         rawRomaji.invalidate()
         // Retain the host's authoritative text/selection, discard stale engine
         // candidates, and start the next keystroke as a new composition.
@@ -1086,7 +1021,7 @@ class TitanImeService : InputMethodService() {
             return true
         }
         if (handlePanel(event, fnHeld)) return true
-        if (!directField && panel.isEmpty() && fnHeld && prefWordDelete && keyCode == KeyEvent.KEYCODE_DEL &&
+        if (!directField && panel.isEmpty() && fnHeld && preferences.wordDelete && keyCode == KeyEvent.KEYCODE_DEL &&
             !event.isAltPressed && !event.isMetaPressed && !output.preedit.hasHighlightedPosition()) {
             finishForAppKey(ic)
             val ctrl = KeyEvent(event.downTime, event.eventTime, event.action, event.keyCode, event.repeatCount,
@@ -1094,7 +1029,7 @@ class TitanImeService : InputMethodService() {
             EditingBindings.send(ic, KeyEvent.KEYCODE_DEL, ctrl)
             return true
         }
-        val navigation = EditingBindings.direction(event, fnHeld, prefEditing, prefEditingLayout)
+        val navigation = EditingBindings.direction(event, fnHeld, preferences.editing, preferences.editingLayout)
         if (navigation != null && !directField && !output.preedit.hasHighlightedPosition()) {
             rawRomaji.invalidate()
             if (preedit.isNotEmpty() && !event.isCtrlPressed && !event.isShiftPressed &&
@@ -1109,7 +1044,7 @@ class TitanImeService : InputMethodService() {
         }
         // altText() consults the input device; it can only produce a value
         // while Alt is held, so plain keys skip that lookup entirely.
-        val altText = if (event.isAltPressed) PhysicalKeyboardPolicy.altText(event, fnHeld, prefAltText) else null
+        val altText = if (event.isAltPressed) PhysicalKeyboardPolicy.altText(event, fnHeld, preferences.altText) else null
         if (event.isCtrlPressed || event.isMetaPressed || (event.isAltPressed && altText == null)) {
             if (japanese && !directField) finishForAppKey(ic)
             return super.onKeyDown(keyCode, event)

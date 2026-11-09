@@ -55,4 +55,30 @@ class ImePreferencesCacheTest {
             check(editor.commit())
         }
     }
+
+    /**
+     * The service reacts to settings changes only through changeListener.
+     * That callback must run after the snapshot absorbed the change —
+     * including for writes made directly to the store, as the settings UI's
+     * own instance produces — so a consumer can never observe a stale value,
+     * regardless of store-listener invocation order.
+     */
+    @Test fun changeListenerObservesUpdatedSnapshot() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val preferences = ImePreferences(context)
+        val original = preferences.store.getBoolean("word_delete", false)
+        val observed = mutableListOf<Boolean>()
+        preferences.changeListener = { key ->
+            if (key == "word_delete") observed += preferences.wordDelete
+        }
+        try {
+            check(preferences.store.edit().putBoolean("word_delete", !original).commit())
+            assertEquals(listOf(!original), observed)
+            preferences.wordDelete = original
+            assertEquals(listOf(!original, original), observed)
+        } finally {
+            preferences.changeListener = null
+            check(preferences.store.edit().putBoolean("word_delete", original).commit())
+        }
+    }
 }
