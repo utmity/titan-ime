@@ -54,7 +54,8 @@ class TitanImeService : InputMethodService() {
         val candidateId = view.tag as? Int ?: return@OnClickListener
         val ic = currentInputConnection ?: return@OnClickListener
         if (!synchronizeEditor(ic)) return@OnClickListener
-        val result = engine?.command(if (output.preedit.hasHighlightedPosition())
+        val action = CandidateActivation.action(output.preedit.hasHighlightedPosition(), explicitCommit = false)
+        val result = engine?.command(if (action == CandidateActivation.Action.HIGHLIGHT_AND_COMMIT)
             SessionCommand.CommandType.HIGHLIGHT_CANDIDATE else SessionCommand.CommandType.SUBMIT_CANDIDATE, candidateId)
             ?: return@OnClickListener
         applyOutput(ic, result)
@@ -819,7 +820,7 @@ class TitanImeService : InputMethodService() {
         val candidate = native.getOrNull(index) ?: return
         val action = CandidateActivation.action(output.preedit.hasHighlightedPosition(), explicitCommit)
         panel = ""; renderPanel()
-        val result = engine?.command(if (action == CandidateActivation.Action.SUBMIT) SessionCommand.CommandType.SUBMIT_CANDIDATE else SessionCommand.CommandType.HIGHLIGHT_CANDIDATE, candidate.id) ?: return
+        val result = engine?.command(if (action == CandidateActivation.Action.HIGHLIGHT_AND_COMMIT) SessionCommand.CommandType.HIGHLIGHT_CANDIDATE else SessionCommand.CommandType.SUBMIT_CANDIDATE, candidate.id) ?: return
         applyOutput(ic, result)
         if (action == CandidateActivation.Action.HIGHLIGHT_AND_COMMIT) engine?.key(MozcKey.newBuilder().setSpecialKey(MozcKey.SpecialKey.ENTER).build())?.let { applyOutput(ic, it) }
     }
