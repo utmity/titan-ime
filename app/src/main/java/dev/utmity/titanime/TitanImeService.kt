@@ -807,7 +807,7 @@ class TitanImeService : InputMethodService() {
         expandedIndex = candidates.indexOfFirst { it.id == CandidatePresentation.focusedId(output) }.coerceAtLeast(0)
         panel = "candidates"; renderPanel(); refreshStrip(updateVisibility = false)
     }
-    private fun submitExpanded(index: Int) {
+    private fun submitExpanded(index: Int, explicitCommit: Boolean = false) {
         if (directField) return
         val native = CandidatePresentation.expanded(output)
         if (index == native.size && rawRomaji.candidate != null && preedit.isNotEmpty()) {
@@ -817,11 +817,11 @@ class TitanImeService : InputMethodService() {
         val ic = currentInputConnection ?: return
         if (!synchronizeEditor(ic)) return
         val candidate = native.getOrNull(index) ?: return
-        val converted = output.preedit.hasHighlightedPosition()
+        val action = CandidateActivation.action(output.preedit.hasHighlightedPosition(), explicitCommit)
         panel = ""; renderPanel()
-        val result = engine?.command(if (converted) SessionCommand.CommandType.HIGHLIGHT_CANDIDATE else SessionCommand.CommandType.SUBMIT_CANDIDATE, candidate.id) ?: return
+        val result = engine?.command(if (action == CandidateActivation.Action.SUBMIT) SessionCommand.CommandType.SUBMIT_CANDIDATE else SessionCommand.CommandType.HIGHLIGHT_CANDIDATE, candidate.id) ?: return
         applyOutput(ic, result)
-        if (converted) engine?.key(MozcKey.newBuilder().setSpecialKey(MozcKey.SpecialKey.ENTER).build())?.let { applyOutput(ic, it) }
+        if (action == CandidateActivation.Action.HIGHLIGHT_AND_COMMIT) engine?.key(MozcKey.newBuilder().setSpecialKey(MozcKey.SpecialKey.ENTER).build())?.let { applyOutput(ic, it) }
     }
 
     private fun startVoice() {
@@ -1003,7 +1003,7 @@ class TitanImeService : InputMethodService() {
             val count = CandidatePresentation.expanded(output).size + if (rawRomaji.candidate != null && preedit.isNotEmpty()) 1 else 0
             if (count == 0) { panel = ""; renderPanel(); return false }
             when {
-                event.keyCode == KeyEvent.KEYCODE_ENTER -> { submitExpanded(expandedIndex); return true }
+                event.keyCode == KeyEvent.KEYCODE_ENTER -> { submitExpanded(expandedIndex, explicitCommit = true); return true }
                 !event.isShiftPressed && (event.keyCode == KeyEvent.KEYCODE_DPAD_UP || fn && event.keyCode == previous) -> expandedIndex = (expandedIndex + count - 1) % count
                 !event.isShiftPressed && (event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN || fn && event.keyCode == next) -> expandedIndex = (expandedIndex + 1) % count
                 else -> return false // Space/segment operations retain native routing.
