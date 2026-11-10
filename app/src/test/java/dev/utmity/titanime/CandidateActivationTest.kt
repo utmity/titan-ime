@@ -3,14 +3,15 @@ package dev.utmity.titanime
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Activation policy for the expanded candidate panel. Regression cover for
- * the bug where tapping a grid cell during conversion also sent ENTER to
- * Mozc and committed the whole composition. */
+/** Activation policy for candidate taps on the strip and in the expanded
+ * panel. Regression cover for two bugs: a grid tap during conversion used
+ * to send ENTER and commit the whole composition, and a tap used to only
+ * highlight, leaving even the chosen segment uncommitted. A tap must
+ * resolve to the segment submit in both UIs. */
 class CandidateActivationTest {
-    @Test fun tapDuringConversionOnlyHighlights() {
-        // The regression: a tap must never reach the commit action.
+    @Test fun tapDuringConversionSubmitsOnlyTheFocusedSegment() {
         assertEquals(
-            CandidateActivation.Action.HIGHLIGHT,
+            CandidateActivation.Action.SUBMIT_SEGMENT,
             CandidateActivation.action(converted = true, explicitCommit = false)
         )
     }
