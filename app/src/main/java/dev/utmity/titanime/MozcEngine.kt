@@ -10,11 +10,17 @@ import java.io.File
 class MozcEngine(private val context: Context) {
     private var session = 0L
     private var twelveKeyInput = false
+    private var twelveKeyAscii = false
 
     /** Set before start(). The experimental preview uses Mozc's stock 12-key table. */
     fun setTwelveKeyInput(enabled: Boolean) {
         require(session == 0L) { "Change the Mozc input table before session start" }
         twelveKeyInput = enabled
+    }
+
+    fun setTwelveKeyAscii(enabled: Boolean) {
+        require(session == 0L) { "Change the Mozc input table before session start" }
+        twelveKeyAscii = enabled
     }
     private var learningEnabled = ImePreferences(context).learning
     init {
@@ -71,7 +77,7 @@ class MozcEngine(private val context: Context) {
         MozcInputProfile.configure(config, twelveKeyInput) // no time-based toggle delimiter
         evaluate(Input.newBuilder().setType(Input.CommandType.SET_CONFIG).setConfig(config))
         evaluate(Input.newBuilder().setType(Input.CommandType.SET_REQUEST)
-            .setRequest(MozcInputProfile.request(twelveKeyInput)))
+            .setRequest(MozcInputProfile.request(twelveKeyInput, twelveKeyAscii)))
     }
 
     fun start() {
@@ -80,6 +86,9 @@ class MozcEngine(private val context: Context) {
         session = evaluate(Input.newBuilder().setType(Input.CommandType.CREATE_SESSION)).id
         check(session != 0L) { "Mozc session creation failed" }
         command(SessionCommand.CommandType.TURN_ON_IME)
+        if (twelveKeyInput && twelveKeyAscii) {
+            commandWithMode(SessionCommand.CommandType.SWITCH_COMPOSITION_MODE, CompositionMode.HALF_ASCII)
+        }
     }
 
     fun close() {
@@ -93,6 +102,11 @@ class MozcEngine(private val context: Context) {
     fun moveCursor(position: Int): Output = evaluate(Input.newBuilder().setId(session)
         .setType(Input.CommandType.SEND_COMMAND).setCommand(SessionCommand.newBuilder()
             .setType(SessionCommand.CommandType.MOVE_CURSOR).setCursorPosition(position)))
+
+    fun commandWithMode(type: SessionCommand.CommandType, mode: CompositionMode): Output {
+        val command = SessionCommand.newBuilder().setType(type).setCompositionMode(mode)
+        return evaluate(Input.newBuilder().setId(session).setType(Input.CommandType.SEND_COMMAND).setCommand(command))
+    }
 
     fun command(type: SessionCommand.CommandType, candidateId: Int? = null): Output {
         val command = SessionCommand.newBuilder().setType(type).setCompositionMode(CompositionMode.HIRAGANA)
