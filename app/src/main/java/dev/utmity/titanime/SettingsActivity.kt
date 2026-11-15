@@ -12,6 +12,7 @@ class SettingsActivity : Activity() {
     private lateinit var mode: TextView
     private val preview get() = packageName == "dev.utmity.titanime.preview"
     private var page = SettingsPage.HOME
+    private val modeChanged: () -> Unit = { updateMode() }
 
     override fun onCreate(state: Bundle?) {
         setTheme(android.R.style.Theme_Material_Light_NoActionBar)
@@ -46,7 +47,7 @@ class SettingsActivity : Activity() {
         text(if (page == SettingsPage.HOME) {
             if (preview) "Titan IME Preview 設定" else "Titan IME 設定"
         } else page.title)
-        mode = text("")
+        mode = text("").apply { tag = "mode-status" }
         fun choices(key: String, title: String, values: List<Pair<String, String>>, current: String, save: (String) -> Unit) {
             text(title)
             val group = RadioGroup(this).apply { id = stableId(key); tag = key }
@@ -191,8 +192,22 @@ class SettingsActivity : Activity() {
         })
     }
 
+    override fun onStart() {
+        super.onStart()
+        InputModeStatus.observe(modeChanged)
+    }
+
+    override fun onStop() {
+        InputModeStatus.removeObserver(modeChanged)
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
+        updateMode()
+    }
+
+    private fun updateMode() {
         mode.text = InputModeStatus.active?.let { "現在の入力モード：$it" }
             ?: "入力欄未接続（QWERTYの日英設定：${if (preferences.japanese) "日本語" else "英語"}）"
     }

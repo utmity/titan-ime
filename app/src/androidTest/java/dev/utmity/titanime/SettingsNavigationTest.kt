@@ -89,6 +89,28 @@ class SettingsNavigationTest {
         }
     }
 
+    @Test fun displayedModeTracksSessionTransitionsWhileSettingsIsOpen() {
+        val original = InputModeStatus.active
+        try {
+            ActivityScenario.launch<SettingsActivity>(intent()).use { scenario ->
+                scenario.onActivity { activity ->
+                    val status = views(activity).filterIsInstance<TextView>().single { it.tag == "mode-status" }
+                    InputModeStatus.active = "12キー英字"
+                    assertEquals("現在の入力モード：12キー英字", status.text.toString())
+                    InputModeStatus.active = "QWERTY・日本語"
+                    assertEquals("現在の入力モード：QWERTY・日本語", status.text.toString())
+                    InputModeStatus.active = null
+                    assertTrue(status.text.toString().startsWith("入力欄未接続"))
+                }
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    val status = views(activity).filterIsInstance<TextView>().single { it.tag == "mode-status" }
+                    assertTrue(status.text.toString().startsWith("入力欄未接続"))
+                }
+            }
+        } finally { instrumentation.runOnMainSync { InputModeStatus.active = original } }
+    }
+
     @Test fun pagesOwnSettingsOnceAndGuidesMatchAvailableInputMethods() {
         val ownership = mutableMapOf<String, SettingsPage>()
         for (page in SettingsPage.homePages(preview)) {
