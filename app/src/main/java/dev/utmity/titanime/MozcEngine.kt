@@ -68,13 +68,12 @@ class MozcEngine(private val context: Context) {
             .setUseRealtimeConversion(preferences.prediction).setSuggestionsSize(8)
             .setUseSpellingCorrection(preferences.correction).setUseTypingCorrection(preferences.correction)
             .setUseKanaModifierInsensitiveConversion(preferences.correction)
-            .setComposingTimeoutThresholdMsec(0) // no time-based toggle delimiter
+        if (twelveKeyInput) config.composingTimeoutThresholdMsec = 0 // no time-based toggle delimiter
         evaluate(Input.newBuilder().setType(Input.CommandType.SET_CONFIG).setConfig(config))
-        evaluate(Input.newBuilder().setType(Input.CommandType.SET_REQUEST).setRequest(
-            Request.newBuilder().setKanaModifierInsensitiveConversion(true)
-                .setSpecialRomanjiTable(if (twelveKeyInput)
-                    Request.SpecialRomanjiTable.TWELVE_KEYS_TO_HIRAGANA
-                    else Request.SpecialRomanjiTable.DEFAULT_TABLE)))
+        val request = Request.newBuilder().setKanaModifierInsensitiveConversion(true)
+        if (twelveKeyInput) request.specialRomanjiTable =
+            Request.SpecialRomanjiTable.TWELVE_KEYS_TO_HIRAGANA
+        evaluate(Input.newBuilder().setType(Input.CommandType.SET_REQUEST).setRequest(request))
     }
 
     fun start() {
