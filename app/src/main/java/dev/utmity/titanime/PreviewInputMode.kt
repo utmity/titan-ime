@@ -36,6 +36,8 @@ internal object PreviewNumericSymbols {
     )
 
     fun choices(key: Char): List<String> {
+        if (key == '*') return listOf("（", "）", "［", "］")
+        if (key == '#') return listOf("、", "。", "？", "！", "…")
         if (key !in '0'..'9') return emptyList()
         val digit = (key - '0' + '０'.code).toChar().toString()
         return listOf(digit) + (hints[key] ?: emptyList())
@@ -48,14 +50,16 @@ internal class PreviewNumericCycle {
         private set
     var index: Int = 0
         private set
+    var current: String? = null
+        private set
 
-    fun reset() { key = null; index = 0 }
+    fun reset() { key = null; index = 0; current = null }
 
     fun advance(pressed: Char): String {
         val values = PreviewNumericSymbols.choices(pressed)
         require(values.isNotEmpty()) { "Not a numeric key: $pressed" }
         index = if (key == pressed) (index + 1) % values.size else 0
         key = pressed
-        return values[index]
+        return values[index].also { current = it }
     }
 }
