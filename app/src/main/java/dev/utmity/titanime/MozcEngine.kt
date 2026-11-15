@@ -9,6 +9,13 @@ import java.io.File
 /** One main-thread session. Mozc owns romaji, preedit, segmentation and candidates. */
 class MozcEngine(private val context: Context) {
     private var session = 0L
+    private var twelveKeyInput = false
+
+    /** Set before start(). The experimental preview uses Mozc's stock 12-key table. */
+    fun setTwelveKeyInput(enabled: Boolean) {
+        require(session == 0L) { "Change the Mozc input table before session start" }
+        twelveKeyInput = enabled
+    }
     private var learningEnabled = ImePreferences(context).learning
     init {
         val data = File(context.filesDir, "mozc-c4b2aef.data")
@@ -61,9 +68,13 @@ class MozcEngine(private val context: Context) {
             .setUseRealtimeConversion(preferences.prediction).setSuggestionsSize(8)
             .setUseSpellingCorrection(preferences.correction).setUseTypingCorrection(preferences.correction)
             .setUseKanaModifierInsensitiveConversion(preferences.correction)
+            .setComposingTimeoutThresholdMsec(0) // no time-based toggle delimiter
         evaluate(Input.newBuilder().setType(Input.CommandType.SET_CONFIG).setConfig(config))
         evaluate(Input.newBuilder().setType(Input.CommandType.SET_REQUEST).setRequest(
-            Request.newBuilder().setKanaModifierInsensitiveConversion(true)))
+            Request.newBuilder().setKanaModifierInsensitiveConversion(true)
+                .setSpecialRomanjiTable(if (twelveKeyInput)
+                    Request.SpecialRomanjiTable.TWELVE_KEYS_TO_HIRAGANA
+                    else Request.SpecialRomanjiTable.DEFAULT_TABLE)))
     }
 
     fun start() {
