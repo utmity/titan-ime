@@ -1210,14 +1210,51 @@ class TitanImeService : InputMethodService() {
      * physical letters to Mozc's existing twelve-key digit and symbol table.
      */
     private fun handleTwelveKeyPreview(ic: InputConnection, keyCode: Int, event: KeyEvent, fnHeld: Boolean): Boolean {
-        if (!twelveKeyPreview || !japanese || directField || engine == null ||
+        if (!twelveKeyPreview || previewMode == PreviewInputMode.QWERTY || directField || engine == null ||
             event.isCtrlPressed || event.isAltPressed || event.isMetaPressed ||
             event.isShiftPressed || event.isSymPressed || fnHeld) return false
 
-        val action = TwelveKeyKeymap.translate(keyCode, twelveKeyHand) ?: return false
+        val numeric = previewMode == PreviewInputMode.NUMBER_HALF || previewMode == PreviewInputMode.NUMBER_FULL
+        if (numeric && keyCode == KeyEvent.KEYCODE_DEL && previewNumericCycle.key != null) {
+            ic.setComposingText("", 1)
+            ic.finishComposingText()
+            previewNumericCycle.reset()
+            return true
+        }
+        val action = TwelveKeyKeymap.translate(keyCode, twelveKeyHand)
+        if (action == null) {
+            if (numeric) finishPreviewNumeric(ic)
+            return false
+        }
         // Physical long-press repeats are not deliberate keypad taps.
         if (event.repeatCount != 0) return true
         rawRomaji.invalidate()
+        if (numeric) {
+            when (action) {
+                is TwelveKeyKeymap.Action.Character -> {
+                    val key = action.value
+                    if (previewMode == PreviewInputMode.NUMBER_HALF) {
+                        finishPreviewNumeric(ic)
+                        ic.commitText(key.toString(), 1)
+                    } else {
+                        val active = previewNumericCycle.key == key &&
+                            previewNumericCycle.current?.let {
+                                ic.getTextBeforeCursor(it.length, 0)?.toString() == it
+                            } == true
+                        if (!active) finishPreviewNumeric(ic)
+                        val value = previewNumericCycle.advance(key)
+                        ic.setComposingText(value, 1)
+                    }
+                }
+                TwelveKeyKeymap.Action.MoveLeft, TwelveKeyKeymap.Action.MoveRight -> {
+                    finishPreviewNumeric(ic)
+                    val direction = if (action == TwelveKeyKeymap.Action.MoveLeft)
+                        KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
+                    EditingBindings.send(ic, direction, event)
+                }
+            }
+            return true
+        }
         when (action) {
             is TwelveKeyKeymap.Action.Character -> {
                 // Replace an editor selection through Mozc first. Writing only
