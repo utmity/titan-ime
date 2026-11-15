@@ -34,6 +34,9 @@ class TitanImeService : InputMethodService() {
         if (key == null || key == "toolbar_mode") refreshStrip()
     }
     private var engine: MozcEngine? = null
+    // Experimental, separately installable preview only. Production key routing is untouched.
+    private val twelveKeyPreview by lazy { packageName == "dev.utmity.titanime.preview" }
+    private val twelveKeyHand = TwelveKeyKeymap.Hand.LEFT
     private var japanese = false
     private var directField = false
     private var selectedReading: Pair<Int, Int>? = null
@@ -144,7 +147,9 @@ class TitanImeService : InputMethodService() {
         japanese = preferences.japanese
         shortcutProfile = preferences.shortcuts()
         preferences.changeListener = { key -> onPreferencesChanged(key) }
-        try { engine = MozcEngine(this) }
+        try {
+            engine = MozcEngine(this).also { it.setTwelveKeyInput(twelveKeyPreview) }
+        }
         catch (error: Exception) { android.util.Log.e("TitanImeProbe", "Mozc initialization failed", error) }
         catch (error: LinkageError) { android.util.Log.e("TitanImeProbe", "Mozc native library unavailable", error) }
     }
@@ -1152,6 +1157,37 @@ class TitanImeService : InputMethodService() {
         refreshStrip()
     }
 
+    /**
+     * Keep this path independent of normal QWERTY routing. Only preview maps
+     * physical letters to Mozc's existing 1..9/0/*/# twelve-key table.
+     */
+    private fun handleTwelveKeyPreview(ic: InputConnection, keyCode: Int, event: KeyEvent, fnHeld: Boolean): Boolean {
+        if (!twelveKeyPreview || !japanese || directField || engine == null ||
+            event.isCtrlPressed || event.isAltPressed || event.isMetaPressed ||
+            event.isShiftPressed || event.isSymPressed || fnHeld) return false
+
+        val action = TwelveKeyKeymap.translate(keyCode, twelveKeyHand) ?: return false
+        // Physical long-press repeats are not deliberate keypad taps.
+        if (event.repeatCount != 0) return true
+        rawRomaji.invalidate()
+        when (action) {
+            is TwelveKeyKeymap.Action.Character -> {
+                val result = engine!!.key(MozcKey.newBuilder().setKeyCode(action.value.code).build())
+                applyOutput(ic, result)
+            }
+            TwelveKeyKeymap.Action.MoveLeft, TwelveKeyKeymap.Action.MoveRight -> {
+                val left = action == TwelveKeyKeymap.Action.MoveLeft
+                val direction = if (left) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
+                if (preedit.isNotEmpty()) {
+                    val special = if (left) MozcKey.SpecialKey.LEFT else MozcKey.SpecialKey.RIGHT
+                    val result = engine!!.key(MozcKey.newBuilder().setSpecialKey(special).build())
+                    applyOutput(ic, result)
+                } else EditingBindings.send(ic, direction, event)
+            }
+        }
+        return true
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         traceLifecycle { "keyDown press=${event.downTime} repeat=${event.repeatCount}" }
         if (voice.active) { voice.cancel(); voiceStatus = ""; panel = ""; renderPanel() }
@@ -1192,6 +1228,7 @@ class TitanImeService : InputMethodService() {
             return true
         }
         if (handlePanel(event, fnHeld)) return true
+        if (handleTwelveKeyPreview(ic, keyCode, event, fnHeld)) return true
         if (!directField && panel.isEmpty() && fnHeld && preferences.wordDelete && keyCode == KeyEvent.KEYCODE_DEL &&
             !event.isAltPressed && !event.isMetaPressed && !output.preedit.hasHighlightedPosition()) {
             finishForAppKey(ic)
