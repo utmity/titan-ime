@@ -1,8 +1,11 @@
 # Physical twelve-key input: pinned Mozc probe (2026-11-15)
 
-Status: **dormant mapping + device-only probe**, not a selectable IME input mode yet.
-This branch does **not** wire the mapping into `TitanImeService`, change language toggles,
-rewrite candidate logic, or change the existing QWERTY path.
+Status: **experimental Preview IME input + device-only native probe**.
+The separate `dev.utmity.titanime.preview` application now uses the stock Mozc
+12-key table when its Japanese mode is active. Production/debug `dev.utmity.titanime`
+still uses its original QWERTY path. The user-facing mode-switch UI is deferred.
+Only LEFT hand is currently enabled in Preview; RIGHT hand translation is implemented
+and unit-tested, but not selectable in the UI yet.
 
 ## Why verify Mozc first?
 
@@ -15,9 +18,9 @@ and overrides `Config.customRomanTable` while active (see upstream
 to 0, documented by Mozc as **not** generating timeout-triggered
 `STOP_KEY_TOGGLING`.
 
-The new `TwelveKeyKeymap.translate` only translates physical Android
-`KEYCODE` values into stock table tokens. It does not commit those tokens to
-the Android editor.
+`TwelveKeyKeymap.translate` translates physical Android `KEYCODE` values
+into stock table tokens, and Preview sends them into the ordinary Mozc session.
+Only Mozc's returned preedit/result text is written to the Android editor.
 
 | Function | Left hand | Right hand | Mozc token |
 | --- | --- | --- | --- |
@@ -30,9 +33,12 @@ the Android editor.
 | Cursor left | Q | O | Mozc LEFT (while composing) |
 | Cursor right / same-row separator | A | L | Mozc RIGHT (while composing) |
 
-Outside the reading-composition state, left/right must instead use Android
-`InputConnection` navigation. Backspace should remove the preceding character;
-Space should use Mozc conversion. Those parts are **not wired yet**.
+Outside a reading composition, Q/A map to Android `InputConnection` arrow
+navigation. When Mozc owns the preedit, Q/A send Mozc LEFT/RIGHT (which also
+breaks the same-row toggle). Backspace and Space continue through the existing
+Mozc service path. The right-hand keys O/L are available in the mapping but
+are not selected by Preview yet. Ctrl/Alt/Shift/SYM/Fn combinations bypass this
+experimental mapping; physical long-press repeat events are ignored.
 
 ## Differences between built-in Mozc and requested behavior
 
@@ -51,11 +57,11 @@ These are grounded in the **exact pinned source table** at
 * The upstream scenario tests explicitly demonstrate that Mozc RIGHT
   separates a repeated 12-key tap (e.g. `1, RIGHT, 1` → ああ).
 
-We should test the native table before choosing between (a) a customized
-12-key TSV supplied through Mozc's `customRomanTable` with the request's
-`specialRomanjiTable` reset to DEFAULT_TABLE, and (b) small local
-preprocessing. A custom table is possible in principle, but must be validated
-through the pinned JNI and packaged dictionary.
+For this first testable Preview, **use the Mozc built-in cycles unchanged**.
+Do not customize the table, punctuation sequence, or small-kana order yet.
+After the real device verifies basic editing, we can choose whether any stock
+cycles are worth changing. This follows the user's decision to customize only
+the physical key handling for now.
 
 ## Run the probes
 
@@ -72,10 +78,16 @@ does **not** execute them (no attached device). The native behavior is therefore
 **unverified on Titan 2 Elite until the instrumented probe runs**.
 Do not treat an APK compile or upstream source test as an actual device test.
 
-## Next step after native verification
+## Preview test workflow
 
-If JNI table selection works, add a custom 12-key table matching the exact
-cycles and a separately enabled experimental frontend. Test cursor insertion
-within composing text, committed-text navigation, Backspace, Space/candidates,
-modifier ordering, and absence of regressions in existing QWERTY. Add mode
-switching / UI later.
+Build with the repository Verify workflow, download its `titan-ime-preview-safe-install`
+artifact and install the separately named Preview APK. The preview IME must be
+manually selected in Android's input method picker, with Japanese input enabled.
+It initially uses the left-hand layout (W/E/R, S/D/F, Z/X/C; Q/A arrows; T/G/V
+special keys). All kana and punctuation follow **Mozc defaults**, including
+the extra small characters and the different stock symbol cycle.
+
+Only after native verification: test cursor insertion within composing text,
+committed-text navigation, Backspace, Space/candidates, modifier ordering, and
+absence of regressions in the existing QWERTY build. Add hand/mode switching UI
+later. This is a preliminary preview and has **not been tested on T2E hardware**.
