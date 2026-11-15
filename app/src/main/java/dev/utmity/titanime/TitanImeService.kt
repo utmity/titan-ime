@@ -227,6 +227,7 @@ class TitanImeService : InputMethodService() {
         voice.cancel(); inlineVisible = false
         panel = ""; inlineBatch?.cancel(); inlineBatch = null; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
         traceState { "finishInput" }
+        if (twelveKeyPreview) currentInputConnection?.let { finishPreviewNumeric(it) }
         engine?.close()
         engine?.sync()
         previewNumericCycle.reset()
