@@ -11,6 +11,33 @@ import org.junit.Test
  * show up in cached getters, and setters must persist as before.
  */
 class ImePreferencesCacheTest {
+    @Test fun twelveKeyCursorAxesPersistAndRefreshAcrossInstances() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.runOnMainSync {
+            val first = ImePreferences(instrumentation.targetContext)
+            val second = ImePreferences(instrumentation.targetContext)
+            val store = first.store
+            val original = store.all["twelve_key_swap_cursor_axes"] as? Boolean
+            try {
+                check(store.edit().remove("twelve_key_swap_cursor_axes").commit())
+                assertFalse(first.twelveKeySwapCursorAxes)
+                assertFalse(second.twelveKeySwapCursorAxes)
+                first.twelveKeySwapCursorAxes = true
+                assertTrue(store.getBoolean("twelve_key_swap_cursor_axes", false))
+                assertTrue(second.twelveKeySwapCursorAxes)
+                assertTrue(ImePreferences(instrumentation.targetContext).twelveKeySwapCursorAxes)
+                check(store.edit().putBoolean("twelve_key_swap_cursor_axes", false).commit())
+                assertFalse(first.twelveKeySwapCursorAxes)
+                assertFalse(second.twelveKeySwapCursorAxes)
+            } finally {
+                val edit = store.edit()
+                if (original == null) edit.remove("twelve_key_swap_cursor_axes")
+                else edit.putBoolean("twelve_key_swap_cursor_axes", original)
+                check(edit.commit())
+            }
+        }
+    }
+
     @Test fun cachedValuesTrackStoreAndSetters() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val preferences = ImePreferences(context)

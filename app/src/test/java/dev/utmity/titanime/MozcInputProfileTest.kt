@@ -16,6 +16,13 @@ class MozcInputProfileTest {
             MozcInputProfile.request(true).specialRomanjiTable)
     }
 
+    @Test fun englishPreviewUsesBuiltInAscii12KeyTable() {
+        assertEquals(Request.SpecialRomanjiTable.TWELVE_KEYS_TO_HALFWIDTHASCII,
+            MozcInputProfile.request(true, ascii = true).specialRomanjiTable)
+        assertEquals(Request.SpecialRomanjiTable.TWELVE_KEYS_TO_HIRAGANA,
+            MozcInputProfile.request(true, ascii = false).specialRomanjiTable)
+    }
+
     @Test fun qwertyPreservesConfigAndOriginalRequest() {
         val config = Config.newBuilder().setComposingTimeoutThresholdMsec(1234)
         val before = config.build()

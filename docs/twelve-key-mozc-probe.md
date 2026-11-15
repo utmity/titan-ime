@@ -4,8 +4,8 @@ Status: **experimental Preview IME input + device-only native probe**.
 The separate `dev.utmity.titanime.preview` application now uses the stock Mozc
 12-key table when its Japanese mode is active. Production/debug `dev.utmity.titanime`
 still uses its original QWERTY path. The user-facing mode-switch UI is deferred.
-Only LEFT hand is currently enabled in Preview; RIGHT hand translation is implemented
-and unit-tested, but not selectable in the UI yet.
+PR #9 enables both physical halves at once in all twelve-key modes.
+See `twelve-key-preview-modes.md` for the current four-way cursor settings.
 
 ## Why verify Mozc first?
 
@@ -30,16 +30,16 @@ Only Mozc's returned preedit/result text is written to the Android editor.
 | わ row | G | G | 0 |
 | Modifiers (voicing/small) | T | T | * |
 | Symbols | V | V | # |
-| Cursor left | Q | O | Mozc LEFT (while composing) |
-| Cursor right / same-row separator | A | L | Mozc RIGHT (while composing) |
+| Cursor left / right | Q / A by default | O / L when axes swapped | Mozc LEFT / RIGHT while composing |
+| Cursor up / down | O / L by default | Q / A when axes swapped | Mozc UP / DOWN while composing |
 
 Outside a reading composition, Q/A map to Android `InputConnection` arrow
 navigation. When Mozc owns the preedit, Q/A send Mozc LEFT/RIGHT (which also
 breaks the same-row toggle). A selected reading collapses to its left/right edge;
 a mapped character replaces that selection through Mozc before updating the editor.
 During conversion Q/A use the existing segment-navigation path. Backspace and Space continue through the existing
-Mozc service path. The right-hand keys O/L are available in the mapping but
-are not selected by Preview yet. Ctrl/Alt/Shift/SYM/Fn combinations bypass this
+Mozc service path. Both character halves are active. O/L now provide Up/Down by default;
+the Preview setting can swap their axes with Q/A. Ctrl/Alt/Shift/SYM/Fn combinations bypass this
 experimental mapping; physical long-press repeat events are ignored.
 
 ## Differences between built-in Mozc and requested behavior
@@ -134,8 +134,8 @@ Select the separate Preview IME and Japanese mode. Keep the normal IME installed
 
 Also check long readings and multi-segment conversion with Q/A, external edits,
 app switching and the actual target editors. Use the normal debug/production IME
-for QWERTY regression verification. Right-hand mapping is maintained and unit
-tested, but its physical operation remains unverified and has no selection UI.
+for QWERTY regression verification. Both character halves are active and unit tested; physical operation remains
+unverified. The cursor-axis setting is described in the PR #9 mode document.
 
 No Android device or emulator is attached in this task environment. Native and
 service integration suites are compiled by CI, **not executed**. Passing host

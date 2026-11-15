@@ -5,10 +5,12 @@ import org.mozc.android.inputmethod.japanese.protobuf.ProtoConfig.Config
 
 /** Input-table settings, kept separate from suggestion preferences. */
 internal object MozcInputProfile {
-    fun request(twelveKey: Boolean): Request = Request.newBuilder()
+    fun request(twelveKey: Boolean, ascii: Boolean = false): Request = Request.newBuilder()
         .setKanaModifierInsensitiveConversion(true)
         .apply {
-            if (twelveKey) specialRomanjiTable = Request.SpecialRomanjiTable.TWELVE_KEYS_TO_HIRAGANA
+            if (twelveKey) specialRomanjiTable = if (ascii)
+                Request.SpecialRomanjiTable.TWELVE_KEYS_TO_HALFWIDTHASCII
+                else Request.SpecialRomanjiTable.TWELVE_KEYS_TO_HIRAGANA
         }.build()
 
     fun configure(config: Config.Builder, twelveKey: Boolean) {

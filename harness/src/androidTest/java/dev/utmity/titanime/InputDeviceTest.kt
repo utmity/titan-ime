@@ -89,8 +89,8 @@ class InputDeviceTest {
                 var selected = false
                 while (!selected && android.os.SystemClock.uptimeMillis() < deadline) {
                     val root = instrumentation.uiAutomation.rootInActiveWindow
-                    val section = if (label.contains("学習")) "辞書・学習・履歴" else if (label.contains("予測") || label.contains("訂正")) "入力・変換" else "物理キー"
-                    root?.findAccessibilityNodeInfosByText("＋ $section")?.firstOrNull { it.text?.toString() == "＋ $section" }
+                    val section = if (label.contains("学習") || label.contains("予測") || label.contains("訂正")) "共通設定" else "QWERTY入力設定"
+                    root?.findAccessibilityNodeInfosByText(section)?.firstOrNull { it.text?.toString() == section && it.isClickable }
                         ?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
                     val node = instrumentation.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(label)?.firstOrNull { it.text?.toString() == label }
                     if (node != null) selected = node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
@@ -98,6 +98,8 @@ class InputDeviceTest {
                 }
                 org.junit.Assert.assertTrue("Settings control available: $label", selected)
                 Thread.sleep(200)
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+                instrumentation.waitForIdleSync()
                 instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
                 instrumentation.waitForIdleSync()
                 Thread.sleep(400)

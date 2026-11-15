@@ -35,7 +35,7 @@ class DictionaryUiTest {
         instrumentation.startActivitySync(Intent(context, SettingsActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         try {
-            click("ユーザー辞書"); click("単語を登録")
+            click("共通設定"); click("ユーザー辞書"); click("単語を登録")
             fill("単語", token); fill("読み（ひらがな）", "テスト")
             click("保存")
             assertTrue(store.list().any { it.entry.key == "てすと" && it.entry.value == token })

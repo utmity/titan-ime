@@ -19,13 +19,19 @@ class TwelveKeyPreviewTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private lateinit var activity: InputTestActivity
-    private var restoreEnglish = false
+    private var originalMode: String? = null
+    private var previewMode = ""
+    private var swappedAxes = false
+    private val leftKey get() = if (swappedAxes) KeyEvent.KEYCODE_O else KeyEvent.KEYCODE_Q
+    private val rightKey get() = if (swappedAxes) KeyEvent.KEYCODE_L else KeyEvent.KEYCODE_A
+    private val upKey get() = if (swappedAxes) KeyEvent.KEYCODE_Q else KeyEvent.KEYCODE_O
+    private val downKey get() = if (swappedAxes) KeyEvent.KEYCODE_A else KeyEvent.KEYCODE_L
     private var registered = false
     private val ready = java.util.concurrent.atomic.AtomicInteger()
-    private var japanese = false
     private val receiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: android.content.Context?, i: Intent?) {
-            japanese = i?.getBooleanExtra("japanese", false) == true
+            previewMode = i?.getStringExtra("preview_mode") ?: ""
+            swappedAxes = i?.getBooleanExtra("twelve_key_swap_cursor_axes", false) == true
             ready.incrementAndGet()
         }
     }
@@ -41,6 +47,12 @@ class TwelveKeyPreviewTest {
         activity = instrumentation.startActivitySync(Intent(context, InputTestActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as InputTestActivity
         instrumentation.waitForIdleSync()
+        reconnect()
+        originalMode = previewMode
+        setMode("KANA")
+    }
+
+    private fun reconnect() {
         val before = ready.get()
         instrumentation.runOnMainSync {
             activity.editor.requestFocus()
@@ -49,12 +61,20 @@ class TwelveKeyPreviewTest {
         val deadline = android.os.SystemClock.uptimeMillis() + 5000
         while (ready.get() == before && android.os.SystemClock.uptimeMillis() < deadline) Thread.sleep(50)
         assertTrue("Preview connected to editor", ready.get() > before)
-        if (!japanese) { key(KeyEvent.KEYCODE_SPACE, meta = KeyEvent.META_FUNCTION_ON); restoreEnglish = true }
+    }
+
+    private fun setMode(target: String) {
+        repeat(5) {
+            if (previewMode == target) return
+            key(KeyEvent.KEYCODE_SPACE, meta = KeyEvent.META_FUNCTION_ON)
+            reconnect()
+        }
+        assertEquals("Default Fn+Space mode shortcut required", target, previewMode)
     }
 
     @After fun close() {
         if (::activity.isInitialized) {
-            if (restoreEnglish) key(KeyEvent.KEYCODE_SPACE, meta = KeyEvent.META_FUNCTION_ON)
+            originalMode?.let { setMode(it) }
             instrumentation.runOnMainSync { activity.finish() }
         }
         if (registered) context.unregisterReceiver(receiver)
@@ -97,14 +117,14 @@ class TwelveKeyPreviewTest {
         Thread.sleep(1500)
         key(KeyEvent.KEYCODE_E); expect("き")
         key(KeyEvent.KEYCODE_E, repeat = 1); expect("き")
-        key(KeyEvent.KEYCODE_A); key(KeyEvent.KEYCODE_E); expect("きか")
-        key(KeyEvent.KEYCODE_Q); expect("きか", 1)
+        key(rightKey); key(KeyEvent.KEYCODE_E); expect("きか")
+        key(leftKey); expect("きか", 1)
         key(KeyEvent.KEYCODE_R); expect("きさか", 2)
         key(KeyEvent.KEYCODE_DEL); expect("きか", 1)
-        key(KeyEvent.KEYCODE_A); expect("きか")
+        key(rightKey); expect("きか")
         key(KeyEvent.KEYCODE_ENTER); expect("きか", composing = false)
-        key(KeyEvent.KEYCODE_Q); expect("きか", 1, composing = false)
-        key(KeyEvent.KEYCODE_A); expect("きか", composing = false)
+        key(leftKey); expect("きか", 1, composing = false)
+        key(rightKey); expect("きか", composing = false)
     }
 
     @Test fun selectedReadingIsReplacedInEngineAndEditor() {
@@ -119,8 +139,8 @@ class TwelveKeyPreviewTest {
 
     @Test fun mappedArrowsCollapseReadingSelectionAtItsEdges() {
         key(KeyEvent.KEYCODE_W); key(KeyEvent.KEYCODE_E); key(KeyEvent.KEYCODE_R)
-        select(0, 2); key(KeyEvent.KEYCODE_Q); expect("あかさ", 0)
-        select(0, 2); key(KeyEvent.KEYCODE_A); expect("あかさ", 2)
+        select(0, 2); key(leftKey); expect("あかさ", 0)
+        select(0, 2); key(rightKey); expect("あかさ", 2)
         key(KeyEvent.KEYCODE_F); expect("あかはさ", 3)
     }
 
@@ -130,7 +150,7 @@ class TwelveKeyPreviewTest {
         select(1, 1)
         key(KeyEvent.KEYCODE_R); expect("あさか", 2)
         key(KeyEvent.KEYCODE_DEL); expect("あか", 1)
-        key(KeyEvent.KEYCODE_A); expect("あか")
+        key(rightKey); expect("あか")
         key(KeyEvent.KEYCODE_SPACE)
         instrumentation.runOnMainSync {
             assertTrue("Space produced a nonempty conversion", activity.editor.text.isNotEmpty())
@@ -141,4 +161,112 @@ class TwelveKeyPreviewTest {
             assertEquals(-1, BaseInputConnection.getComposingSpanStart(activity.editor.text))
         }
     }
+    @Test fun bothHalvesShareKanaEnglishAndNumericRows() {
+        key(KeyEvent.KEYCODE_E); expect("か")
+        key(KeyEvent.KEYCODE_U); expect("き")
+        key(rightKey); key(KeyEvent.KEYCODE_U); expect("きか")
+        setMode("ENGLISH")
+        instrumentation.runOnMainSync { activity.editor.setText("") }
+        reconnect()
+        key(KeyEvent.KEYCODE_E); expect("a")
+        key(KeyEvent.KEYCODE_U); expect("b")
+        key(rightKey); key(KeyEvent.KEYCODE_E); expect("ba")
+        setMode("NUMBER_HALF")
+        instrumentation.runOnMainSync { activity.editor.setText("") }
+        reconnect()
+        key(KeyEvent.KEYCODE_E); key(KeyEvent.KEYCODE_U); expect("22", composing = false)
+        setMode("NUMBER_FULL")
+        instrumentation.runOnMainSync { activity.editor.setText("") }
+        reconnect()
+        key(KeyEvent.KEYCODE_E); expect("２")
+        key(KeyEvent.KEYCODE_U); expect("￥")
+        key(rightKey); key(KeyEvent.KEYCODE_U)
+        instrumentation.runOnMainSync { assertEquals("￥２", activity.editor.text.toString()) }
+    }
+
+    @Test fun committedTextUsesAllFourEditorDirectionsInEveryTwelveKeyMode() {
+        for (mode in listOf("KANA", "ENGLISH", "NUMBER_HALF", "NUMBER_FULL")) {
+            setMode(mode)
+            instrumentation.runOnMainSync {
+                activity.editor.setText("abc\ndef")
+                activity.editor.setSelection(5)
+            }
+            reconnect()
+            key(upKey); expect("abc\ndef", 1, composing = false)
+            key(downKey); expect("abc\ndef", 5, composing = false)
+            key(leftKey); expect("abc\ndef", 4, composing = false)
+            key(rightKey); expect("abc\ndef", 5, composing = false)
+        }
+    }
+
+    @Test fun mappedConversionDirectionsMatchRealDpad() {
+        // Compare complete editing results against the native DPAD route,
+        // rather than assuming a dictionary-dependent candidate spelling.
+        fun convertAndNavigate(keys: List<Int>): Pair<String, Int> {
+            instrumentation.runOnMainSync { activity.editor.setText("") }
+            reconnect()
+            key(KeyEvent.KEYCODE_W); key(KeyEvent.KEYCODE_E); key(KeyEvent.KEYCODE_R)
+            key(KeyEvent.KEYCODE_SPACE)
+            keys.forEach { key(it) }
+            var state = "" to 0
+            instrumentation.runOnMainSync { state = activity.editor.text.toString() to activity.editor.selectionStart }
+            return state
+        }
+        val mapped = convertAndNavigate(listOf(downKey, upKey, leftKey, rightKey))
+        val physical = convertAndNavigate(listOf(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_UP,
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT))
+        assertEquals(physical, mapped)
+    }
+
+    @Test fun qwertyLeavesLetterKeysUnmapped() {
+        setMode("QWERTY")
+        // Both Latin and Japanese QWERTY must consume these as letters, with
+        // no synthetic DPAD reaching the editor, regardless of cursor setting.
+        instrumentation.runOnMainSync { activity.receivedKeys.clear() }
+        for (code in listOf(KeyEvent.KEYCODE_Q, KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_O,
+            KeyEvent.KEYCODE_L, KeyEvent.KEYCODE_Y, KeyEvent.KEYCODE_U)) key(code)
+        instrumentation.runOnMainSync {
+            assertTrue(activity.editor.text.isNotEmpty())
+            assertTrue(activity.receivedKeys.none { it.keyCode in listOf(KeyEvent.KEYCODE_DPAD_LEFT,
+                KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN) })
+        }
+    }
+
+    @Test fun pCommitsEachTwelveKeyModeSkipsQwertyAndIgnoresRepeat() {
+        for ((mode, text, next) in listOf(
+            Triple("KANA", "か", "ENGLISH"), Triple("ENGLISH", "a", "NUMBER_HALF"),
+            Triple("NUMBER_HALF", "2", "NUMBER_FULL"), Triple("NUMBER_FULL", "２", "KANA")
+        )) {
+            setMode(mode)
+            instrumentation.runOnMainSync { activity.editor.setText("") }
+            reconnect()
+            key(KeyEvent.KEYCODE_E)
+            expect(text, composing = mode != "NUMBER_HALF")
+            key(KeyEvent.KEYCODE_P, repeat = 1)
+            expect(text, composing = mode != "NUMBER_HALF")
+            key(KeyEvent.KEYCODE_P)
+            expect(text, composing = false)
+            reconnect()
+            assertEquals(next, previewMode)
+        }
+        setMode("QWERTY")
+        instrumentation.runOnMainSync { activity.editor.setText("") }
+        reconnect()
+        key(KeyEvent.KEYCODE_P)
+        instrumentation.runOnMainSync { assertEquals("p", activity.editor.text.toString()) }
+        reconnect()
+        assertEquals("QWERTY", previewMode)
+    }
+
+    @Test fun pPreservesConvertedCandidateBeforeChangingMode() {
+        key(KeyEvent.KEYCODE_W); key(KeyEvent.KEYCODE_E); key(KeyEvent.KEYCODE_SPACE)
+        var converted = ""
+        instrumentation.runOnMainSync { converted = activity.editor.text.toString() }
+        assertTrue(converted.isNotEmpty())
+        key(KeyEvent.KEYCODE_P)
+        expect(converted, composing = false)
+        reconnect()
+        assertEquals("ENGLISH", previewMode)
+    }
+
 }
