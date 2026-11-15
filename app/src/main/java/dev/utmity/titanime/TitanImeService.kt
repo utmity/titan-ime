@@ -1159,7 +1159,7 @@ class TitanImeService : InputMethodService() {
 
     /**
      * Keep this path independent of normal QWERTY routing. Only preview maps
-     * physical letters to Mozc's existing 1..9/0/*/# twelve-key table.
+     * physical letters to Mozc's existing twelve-key digit and symbol table.
      */
     private fun handleTwelveKeyPreview(ic: InputConnection, keyCode: Int, event: KeyEvent, fnHeld: Boolean): Boolean {
         if (!twelveKeyPreview || !japanese || directField || engine == null ||
