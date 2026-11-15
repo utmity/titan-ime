@@ -37,6 +37,8 @@ class TitanImeService : InputMethodService() {
     // Experimental, separately installable preview only. Production key routing is untouched.
     private val twelveKeyPreview by lazy { packageName == "dev.utmity.titanime.preview" }
     private val twelveKeyHand = TwelveKeyKeymap.Hand.LEFT
+    private var previewMode = PreviewInputMode.KANA
+    private val previewNumericCycle = PreviewNumericCycle()
     private var japanese = false
     private var directField = false
     private var selectedReading: Pair<Int, Int>? = null
@@ -144,7 +146,7 @@ class TitanImeService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         clipboard.addPrimaryClipChangedListener(clipListener)
-        japanese = preferences.japanese
+        japanese = if (twelveKeyPreview) true else preferences.japanese
         shortcutProfile = preferences.shortcuts()
         preferences.changeListener = { key -> onPreferencesChanged(key) }
         try {
@@ -227,6 +229,7 @@ class TitanImeService : InputMethodService() {
         traceState { "finishInput" }
         engine?.close()
         engine?.sync()
+        previewNumericCycle.reset()
         rawRomaji.invalidate()
         preedit = ""
         compositionStart = -1
@@ -393,7 +396,18 @@ class TitanImeService : InputMethodService() {
         panel = ""; inlineBatch?.cancel(); inlineBatch = null; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
         super.onStartInput(attribute, restarting)
         engine?.setLearning(preferences.learning)
+        if (twelveKeyPreview) {
+            engine?.close()
+            engine?.setTwelveKeyInput(previewMode == PreviewInputMode.KANA || previewMode == PreviewInputMode.ENGLISH)
+            engine?.setTwelveKeyAscii(previewMode == PreviewInputMode.ENGLISH)
+        }
         engine?.start()
+        if (twelveKeyPreview) japanese = when (previewMode) {
+            PreviewInputMode.QWERTY -> preferences.japanese
+            PreviewInputMode.KANA, PreviewInputMode.ENGLISH -> true
+            PreviewInputMode.NUMBER_HALF, PreviewInputMode.NUMBER_FULL -> false
+        }
+        previewNumericCycle.reset()
         rawRomaji.invalidate()
         preedit = ""
         compositionStart = -1
@@ -531,7 +545,12 @@ class TitanImeService : InputMethodService() {
         toolbarRow?.visibility = if (toolbarNeeded) View.VISIBLE else View.GONE
         toolbarSpacer?.visibility = if (toolbarNeeded) View.VISIBLE else View.GONE
         menuButton?.visibility = if (!directField || inlineVisible) View.VISIBLE else View.GONE
-        modeButton?.apply { text = if (japanese) "あ" else "A"; contentDescription = if (japanese) "日本語モード・切替" else "英語モード・切替"; visibility = if (directField) View.GONE else View.VISIBLE }
+        modeButton?.apply {
+            text = if (twelveKeyPreview) previewMode.badge else if (japanese) "あ" else "A"
+            contentDescription = if (twelveKeyPreview) "${previewMode.description}・次の入力モードへ切替"
+                else if (japanese) "日本語モード・切替" else "英語モード・切替"
+            visibility = if (directField) View.GONE else View.VISIBLE
+        }
         updateVoiceButton()
         val raw = if (!directField && japanese && preedit.isNotEmpty()) rawRomaji.candidate else null
         val state = CandidatePresentation.stripState(output, preedit, raw, japanese,
@@ -796,7 +815,35 @@ class TitanImeService : InputMethodService() {
             contentDescription = if (voice.active) "音声入力を中止" else "音声入力"
         }
     }
+    private fun finishPreviewNumeric(ic: InputConnection) {
+        if (previewNumericCycle.key == null) return
+        ic.finishComposingText()
+        previewNumericCycle.reset()
+    }
+
+    private fun advancePreviewMode() {
+        if (!twelveKeyPreview || directField || engine == null) return
+        val ic = currentInputConnection ?: return
+        voice.cancel()
+        if (previewMode == PreviewInputMode.KANA || previewMode == PreviewInputMode.ENGLISH) {
+            commitComposition(ic)
+        } else finishPreviewNumeric(ic)
+        previewMode = previewMode.next()
+        engine?.close()
+        engine?.setTwelveKeyInput(previewMode == PreviewInputMode.KANA || previewMode == PreviewInputMode.ENGLISH)
+        engine?.setTwelveKeyAscii(previewMode == PreviewInputMode.ENGLISH)
+        engine?.start()
+        japanese = when (previewMode) {
+            PreviewInputMode.QWERTY -> preferences.japanese
+            PreviewInputMode.KANA, PreviewInputMode.ENGLISH -> true
+            PreviewInputMode.NUMBER_HALF, PreviewInputMode.NUMBER_FULL -> false
+        }
+        rawRomaji.invalidate()
+        panel = ""; renderPanel(); refreshStrip()
+    }
+
     private fun toggleLanguage() {
+        if (twelveKeyPreview) { advancePreviewMode(); return }
         if (directField || engine == null) return
         val ic = currentInputConnection ?: return
         voice.cancel()
@@ -1137,7 +1184,8 @@ class TitanImeService : InputMethodService() {
         if (preedit.isEmpty()) return
         // Ask Mozc to resolve pending romaji (notably final n) before kana commitment.
         // An already converted candidate must retain the user's selected spelling.
-        if (!output.preedit.hasHighlightedPosition()) {
+        if (!output.preedit.hasHighlightedPosition() &&
+            !(twelveKeyPreview && previewMode == PreviewInputMode.ENGLISH)) {
             engine?.key(MozcKey.newBuilder().setSpecialKey(MozcKey.SpecialKey.F6).build())
         }
         engine?.command(SessionCommand.CommandType.SUBMIT)?.let { applyOutput(ic, it) }
