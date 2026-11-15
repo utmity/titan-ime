@@ -208,7 +208,7 @@ class EditorCompatibilityTest {
             Thread.sleep(150)
             instrumentation.runOnMainSync { assertEquals(0, BaseInputConnection.getComposingSpanStart(activity.editor.text)) }
             key(KeyEvent.KEYCODE_ESCAPE); expect("か")
-            key(KeyEvent.KEYCODE_V, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+            key(KeyEvent.KEYCODE_V, KeyEvent.META_FUNCTION_ON)
             key(KeyEvent.KEYCODE_ESCAPE); expect("か")
             instrumentation.runOnMainSync { assertEquals(0, BaseInputConnection.getComposingSpanStart(activity.editor.text)) }
             key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_ENTER)
@@ -216,28 +216,28 @@ class EditorCompatibilityTest {
     }
     @Test fun physicalNavigationPreservesReadingAndSelection() {
         type("nihongo")
-        key(KeyEvent.KEYCODE_H, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_H, KeyEvent.META_FUNCTION_ON)
         type("ka"); expect("にほんかご")
         key(KeyEvent.KEYCODE_DEL); expect("にほんご")
         key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_ENTER)
         instrumentation.runOnMainSync { activity.editor.setText("ab😀c\nxyz"); activity.editor.setSelection(5) }
         reconnect()
-        key(KeyEvent.KEYCODE_H, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_H, KeyEvent.META_FUNCTION_ON)
         instrumentation.runOnMainSync { assertEquals(4, activity.editor.selectionStart) }
-        key(KeyEvent.KEYCODE_H, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_H, KeyEvent.META_FUNCTION_ON)
         instrumentation.runOnMainSync { assertEquals("Must not split surrogate pair", 2, activity.editor.selectionStart) }
-        key(KeyEvent.KEYCODE_L, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_L, KeyEvent.META_FUNCTION_ON)
         instrumentation.runOnMainSync { assertEquals(2, activity.editor.selectionStart); assertEquals(4, activity.editor.selectionEnd) }
         instrumentation.runOnMainSync { activity.editor.setText("Ae\u0301B\nxyz"); activity.editor.setSelection(1) }
         reconnect()
-        key(KeyEvent.KEYCODE_L, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_L, KeyEvent.META_FUNCTION_ON)
         instrumentation.runOnMainSync { assertEquals(1, activity.editor.selectionStart); assertEquals(3, activity.editor.selectionEnd) }
-        key(KeyEvent.KEYCODE_L, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_L, KeyEvent.META_FUNCTION_ON)
         instrumentation.runOnMainSync { assertEquals(1, activity.editor.selectionStart); assertEquals(4, activity.editor.selectionEnd) }
         instrumentation.runOnMainSync { activity.editor.setSelection(1) }
-        key(KeyEvent.KEYCODE_J, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_J, KeyEvent.META_FUNCTION_ON)
         instrumentation.runOnMainSync { assertTrue("Move to second line", activity.editor.selectionStart >= 5) }
-        key(KeyEvent.KEYCODE_K, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_K, KeyEvent.META_FUNCTION_ON)
         instrumentation.runOnMainSync { assertTrue("Move back to first line", activity.editor.selectionStart < 5) }
     }
     @Test fun synchronousDifferentLengthNormalization() = normalize("別名")
@@ -273,24 +273,24 @@ class EditorCompatibilityTest {
     @Test fun selectedTextTransformsOnlySelection() {
         instrumentation.runOnMainSync { activity.editor.setText("前hello😀後"); activity.editor.setSelection(1, 6) }
         Thread.sleep(150)
-        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON)
         key(KeyEvent.KEYCODE_ENTER)
         expect("前HELLO😀後")
         instrumentation.runOnMainSync { assertEquals(6, activity.editor.selectionStart) }
         // No selection must not transform the document.
-        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON)
         expect("前HELLO😀後")
     }
     @Test fun transformMenuCancelAndComposingGuard() {
         instrumentation.runOnMainSync { activity.editor.setText("Hello"); activity.editor.selectAll() }
         Thread.sleep(150)
-        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON)
         key(KeyEvent.KEYCODE_BACK)
         expect("Hello")
         instrumentation.runOnMainSync { activity.editor.setText("") }
         reconnect()
         type("ka")
-        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON)
         expect("か")
         instrumentation.runOnMainSync { assertEquals(0, BaseInputConnection.getComposingSpanStart(activity.editor.text)) }
         key(KeyEvent.KEYCODE_SPACE)
@@ -305,8 +305,8 @@ class EditorCompatibilityTest {
             val selected = source + "😀\n"
             instrumentation.runOnMainSync { activity.editor.setText("前" + selected + "後"); activity.editor.setSelection(1, 1 + selected.length) }
             Thread.sleep(150)
-            key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
-            repeat(index) { key(KeyEvent.KEYCODE_J, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON) }
+            key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON)
+            repeat(index) { key(KeyEvent.KEYCODE_J, KeyEvent.META_FUNCTION_ON) }
             key(KeyEvent.KEYCODE_ENTER)
             expect("前" + expected + "😀\n後")
         }
@@ -315,7 +315,7 @@ class EditorCompatibilityTest {
     @Test fun transformPanelDoesNotSwallowAppShortcut() {
         instrumentation.runOnMainSync { activity.editor.setText("Hello"); activity.editor.selectAll(); activity.receivedKeys.clear() }
         Thread.sleep(150)
-        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_T, KeyEvent.META_FUNCTION_ON)
         key(KeyEvent.KEYCODE_Z, KeyEvent.META_CTRL_ON)
         instrumentation.runOnMainSync {
             val keys = activity.receivedKeys.filter { it.keyCode == KeyEvent.KEYCODE_Z }
@@ -335,12 +335,12 @@ class EditorCompatibilityTest {
         }
         return automation.windows.filter { it.root?.packageName?.toString() == "dev.utmity.titanime" }.firstNotNullOfOrNull { find(it.root) }
     }
-    private fun tapIme(label: String) {
+    private fun tapIme(label: String, longPress: Boolean = false) {
         val end = android.os.SystemClock.uptimeMillis() + 4000
         var node = imeNode(label)
         while (node == null && android.os.SystemClock.uptimeMillis() < end) { Thread.sleep(100); node = imeNode(label) }
         assertNotNull(label, node)
-        assertTrue(node!!.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
+        assertTrue(node!!.performAction(if (longPress) android.view.accessibility.AccessibilityNodeInfo.ACTION_LONG_CLICK else android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
         instrumentation.waitForIdleSync(); Thread.sleep(150)
     }
     @Test fun expandedCandidatesPreserveCompositionAndCommitOnce() {
@@ -352,7 +352,7 @@ class EditorCompatibilityTest {
         instrumentation.runOnMainSync { assertEquals(0, BaseInputConnection.getComposingSpanStart(activity.editor.text)) }
         key(KeyEvent.KEYCODE_SPACE)
         tapIme("候補一覧を開く")
-        key(KeyEvent.KEYCODE_J, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_J, KeyEvent.META_FUNCTION_ON)
         key(KeyEvent.KEYCODE_ENTER)
         var committed = ""
         instrumentation.runOnMainSync {
@@ -380,9 +380,9 @@ class EditorCompatibilityTest {
     @Test fun toolbarModeMicrophoneAndUndoPair() {
         type("ka"); key(KeyEvent.KEYCODE_ENTER)
         assertNotNull(imeNode("音声入力"))
-        tapIme("日本語モード・切替")
-        assertNotNull(imeNode("英語モード・切替")); assertNotNull(imeNode("音声入力"))
-        tapIme("英語モード・切替")
+        tapIme("QWERTY・日本語・次の入力方式へ切替・長押しで日英切替", longPress = true)
+        assertNotNull(imeNode("QWERTY・英語・次の入力方式へ切替・長押しで日英切替")); assertNotNull(imeNode("音声入力"))
+        tapIme("QWERTY・英語・次の入力方式へ切替・長押しで日英切替", longPress = true)
         tapIme("入力メニュー")
         fun hasVoiceMenuItem(node: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
             if (node == null) return false
@@ -415,13 +415,13 @@ class EditorCompatibilityTest {
         instrumentation.runOnMainSync { activity.editor.setText("abcd"); activity.editor.setSelection(1, 3) }
         Thread.sleep(150)
         for (code in listOf(KeyEvent.KEYCODE_V, KeyEvent.KEYCODE_T)) {
-            key(code, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+            key(code, KeyEvent.META_FUNCTION_ON)
             key(KeyEvent.KEYCODE_BACK)
             instrumentation.runOnMainSync { assertEquals(1, activity.editor.selectionStart); assertEquals(3, activity.editor.selectionEnd) }
         }
         tapIme("入力メニュー"); key(KeyEvent.KEYCODE_BACK)
         instrumentation.runOnMainSync { assertEquals(1, activity.editor.selectionStart); assertEquals(3, activity.editor.selectionEnd) }
-        key(KeyEvent.KEYCODE_V, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_V, KeyEvent.META_FUNCTION_ON)
         key(KeyEvent.KEYCODE_A)
         expect("aあd") // ordinary input replaces selection; no hidden search buffer
     }

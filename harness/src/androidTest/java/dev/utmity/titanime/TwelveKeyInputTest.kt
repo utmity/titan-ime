@@ -277,12 +277,15 @@ class TwelveKeyInputTest {
 
     @Test fun selectedModeSurvivesFieldAndInputConnectionChanges() {
         setMode("ENGLISH")
+        val before = ready.get()
         instrumentation.runOnMainSync {
             activity.secondEditor.requestFocus()
             activity.getSystemService(InputMethodManager::class.java).restartInput(activity.secondEditor)
         }
         instrumentation.waitForIdleSync()
-        Thread.sleep(300)
+        val deadline = android.os.SystemClock.uptimeMillis() + 5000
+        while (ready.get() == before && android.os.SystemClock.uptimeMillis() < deadline) Thread.sleep(50)
+        assertTrue("Second field connected", ready.get() > before)
         assertEquals("ENGLISH", inputMode)
         reconnect()
         assertEquals("ENGLISH", inputMode)
