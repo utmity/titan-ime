@@ -1172,13 +1172,23 @@ class TitanImeService : InputMethodService() {
         rawRomaji.invalidate()
         when (action) {
             is TwelveKeyKeymap.Action.Character -> {
+                // Replace an editor selection through Mozc first. Writing only
+                // to InputConnection would leave the native reading unchanged.
+                deleteSelectedReading(ic)
                 val result = engine!!.key(MozcKey.newBuilder().setKeyCode(action.value.code).build())
                 applyOutput(ic, result)
             }
             TwelveKeyKeymap.Action.MoveLeft, TwelveKeyKeymap.Action.MoveRight -> {
                 val left = action == TwelveKeyKeymap.Action.MoveLeft
                 val direction = if (left) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
-                if (preedit.isNotEmpty()) {
+                val range = selectedReading
+                if (range != null) {
+                    val offset = if (left) range.first else range.second
+                    selectedReading = null
+                    engine!!.moveCursor(preedit.codePointCount(0, offset)).let { applyOutput(ic, it) }
+                } else if (output.preedit.hasHighlightedPosition()) {
+                    moveSegment(if (left) MozcKey.SpecialKey.LEFT else MozcKey.SpecialKey.RIGHT)
+                } else if (preedit.isNotEmpty()) {
                     val special = if (left) MozcKey.SpecialKey.LEFT else MozcKey.SpecialKey.RIGHT
                     val result = engine!!.key(MozcKey.newBuilder().setSpecialKey(special).build())
                     applyOutput(ic, result)

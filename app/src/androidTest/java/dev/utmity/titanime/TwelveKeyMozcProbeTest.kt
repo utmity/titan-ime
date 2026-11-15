@@ -1,59 +1,26 @@
 package dev.utmity.titanime
 
 import androidx.test.platform.app.InstrumentationRegistry
-import com.google.android.apps.inputmethod.libs.mozc.session.MozcJni
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mozc.android.inputmethod.japanese.protobuf.ProtoCommands.*
 
-/**
- * Native arm64 probe, deliberately separate from TitanImeService.
- * Not run by desktop :app:testDebugUnitTest; run on the actual device with
- * :app:connectedDebugAndroidTest or adb am instrument.
- *
- * Confirms the stock pinned Mozc 12-key table can be used through the SAME
- * JNI and dictionary packaged by Titan IME. It intentionally documents
- * stock behaviors that need customization to match the desired layout.
+/** Native tests of the same MozcEngine configuration used by Preview.
+ * Run with -PandroidTestBuildType=preview on an arm64 device.
  */
 class TwelveKeyMozcProbeTest {
     @Test fun nativeTwelveKeyTableToggleModifierCursorAndConversion() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val initializer = MozcEngine(context)
-        var session = 0L
-
-        fun evaluate(input: Input.Builder): Output = synchronized(MozcEngine::class.java) {
-            val bytes = Command.newBuilder().setInput(input).build().toByteArray()
-            Command.parseFrom(MozcJni.evalCommand(bytes)).output
-        }
-        fun send(key: KeyEvent): Output = evaluate(
-            Input.newBuilder().setType(Input.CommandType.SEND_KEY).setId(session).setKey(key)
-        )
-        fun press(character: Char): Output = send(KeyEvent.newBuilder().setKeyCode(character.code).build())
-        fun special(key: KeyEvent.SpecialKey): Output = send(KeyEvent.newBuilder().setSpecialKey(key).build())
-        fun command(type: SessionCommand.CommandType): Output = evaluate(
-            Input.newBuilder().setType(Input.CommandType.SEND_COMMAND).setId(session)
-                .setCommand(SessionCommand.newBuilder().setType(type))
-        )
+        val engine = MozcEngine(context).also { it.setTwelveKeyInput(true) }
+        fun press(character: Char): Output = engine.key(KeyEvent.newBuilder().setKeyCode(character.code).build())
+        fun special(key: KeyEvent.SpecialKey): Output = engine.key(KeyEvent.newBuilder().setSpecialKey(key).build())
         fun reading(output: Output): String = output.preedit.segmentList.joinToString("") { it.value }
-        fun reset() { command(SessionCommand.CommandType.RESET_CONTEXT) }
+        fun reset() { engine.command(SessionCommand.CommandType.RESET_CONTEXT) }
 
         try {
-            // A non-default table overrides the romaji table in Config. No
-            // production preference or normal key routing is changed.
-            evaluate(Input.newBuilder().setType(Input.CommandType.SET_REQUEST).setRequest(
-                Request.newBuilder()
-                    .setSpecialRomanjiTable(Request.SpecialRomanjiTable.TWELVE_KEYS_TO_HIRAGANA)
-                    .setKanaModifierInsensitiveConversion(true)
-            ))
-            session = evaluate(Input.newBuilder().setType(Input.CommandType.CREATE_SESSION)).id
-            assertTrue("Could not create Mozc native session", session != 0L)
-            command(SessionCommand.CommandType.TURN_ON_IME)
-            // Set mode explicitly so the test never depends on a default.
-            evaluate(Input.newBuilder().setType(Input.CommandType.SEND_COMMAND).setId(session)
-                .setCommand(SessionCommand.newBuilder()
-                    .setType(SessionCommand.CommandType.SWITCH_COMPOSITION_MODE)
-                    .setCompositionMode(CompositionMode.HIRAGANA)))
+            engine.start()
+            engine.command(SessionCommand.CommandType.SWITCH_COMPOSITION_MODE)
 
             reset()
             assertEquals("あ", reading(press('1')))
@@ -95,11 +62,40 @@ class TwelveKeyMozcProbeTest {
                     converted.allCandidateWords.candidatesCount > 0 ||
                     converted.preedit.hasHighlightedPosition())
         } finally {
-            if (session != 0L) evaluate(Input.newBuilder()
-                .setType(Input.CommandType.DELETE_SESSION).setId(session))
-            // Restore the normal request, including the usual suggestion config.
-            initializer.configureSuggestions()
-            initializer.close()
+            engine.close()
+        }
+    }
+
+    @Test fun nativeMidReadingInsertionBackspaceAndSessionRestart() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val engine = MozcEngine(context).also { it.setTwelveKeyInput(true) }
+        fun reading(output: Output) = output.preedit.segmentList.joinToString("") { it.value }
+        fun press(c: Char) = engine.key(KeyEvent.newBuilder().setKeyCode(c.code).build())
+        fun special(key: KeyEvent.SpecialKey) = engine.key(KeyEvent.newBuilder().setSpecialKey(key).build())
+        try {
+            engine.start()
+            engine.command(SessionCommand.CommandType.SWITCH_COMPOSITION_MODE)
+            assertEquals("あ", reading(press('1')))
+            // A pause longer than the conventional multi-tap timeout must not
+            // commit the row or start a second character.
+            Thread.sleep(1500)
+            assertEquals("い", reading(press('1')))
+            assertEquals("いか", reading(press('2')))
+            special(KeyEvent.SpecialKey.LEFT)
+            assertEquals("いさか", reading(press('3')))
+            assertEquals("いか", reading(special(KeyEvent.SpecialKey.BACKSPACE)))
+            assertEquals("い", reading(special(KeyEvent.SpecialKey.DEL)))
+            assertEquals("", reading(special(KeyEvent.SpecialKey.BACKSPACE)))
+            assertEquals("か", reading(press('2')))
+            val committed = engine.command(SessionCommand.CommandType.SUBMIT)
+            assertEquals("か", committed.result.value)
+            assertEquals("", reading(committed))
+            // Editor resets must reapply the twelve-key request.
+            engine.start()
+            engine.command(SessionCommand.CommandType.SWITCH_COMPOSITION_MODE)
+            assertEquals("か", reading(press('2')))
+        } finally {
+            engine.close()
         }
     }
 }

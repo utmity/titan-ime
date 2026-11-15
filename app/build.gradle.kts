@@ -60,6 +60,9 @@ android {
             manifestPlaceholders["imeSettingsLabel"] = "Titan IME Preview 設定"
         }
     }
+    // Exercise the experimental input table in instrumentation, without
+    // installing or configuring the production IME.
+    testBuildType = providers.gradleProperty("androidTestBuildType").getOrElse("debug")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

@@ -46,10 +46,12 @@ jobs:
       - name: Verify and build (no device connected)
         run: >-
           bash gradlew --no-daemon --console=plain
-          :app:testDebugUnitTest :app:lintDebug :harness:lintDebug
+          :app:testDebugUnitTest :app:testPreviewUnitTest :app:lintDebug :app:lintPreview :harness:lintDebug
           :app:assembleDebug :app:assembleRelease :app:assemblePreview
           :app:assembleDebugAndroidTest
           :harness:assembleDebug :harness:assembleDebugAndroidTest
+      - name: Build Preview instrumentation APK
+        run: bash gradlew --no-daemon --console=plain -PandroidTestBuildType=preview :app:assemblePreviewAndroidTest
       - name: Save verification reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -102,10 +104,12 @@ jobs:
       - name: Save device-test APKs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: debug-device-test-apks
+          name: debug-and-preview-device-test-apks
           path: |
             app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/preview/*.apk
             app/build/outputs/apk/androidTest/debug/*.apk
+            app/build/outputs/apk/androidTest/preview/*.apk
             harness/build/outputs/apk/debug/*.apk
             harness/build/outputs/apk/androidTest/debug/*.apk
           if-no-files-found: error

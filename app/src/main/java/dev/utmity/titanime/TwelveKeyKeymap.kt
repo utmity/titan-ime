@@ -3,9 +3,8 @@ package dev.utmity.titanime
 import android.view.KeyEvent
 
 /**
- * Physical-key translation only. This is intentionally not wired into
- * TitanImeService yet: the existing QWERTY path must remain unchanged while
- * the pinned Mozc native 12-key table is probed on a device.
+ * Physical-key translation for the separate Preview application only.
+ * TitanImeService keeps the production QWERTY route unchanged.
  *
  * The returned characters are the stock Mozc twelve-key table inputs
  * (1..9, 0, *, #), not characters to commit to the editor.

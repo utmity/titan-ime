@@ -35,7 +35,9 @@ Only Mozc's returned preedit/result text is written to the Android editor.
 
 Outside a reading composition, Q/A map to Android `InputConnection` arrow
 navigation. When Mozc owns the preedit, Q/A send Mozc LEFT/RIGHT (which also
-breaks the same-row toggle). Backspace and Space continue through the existing
+breaks the same-row toggle). A selected reading collapses to its left/right edge;
+a mapped character replaces that selection through Mozc before updating the editor.
+During conversion Q/A use the existing segment-navigation path. Backspace and Space continue through the existing
 Mozc service path. The right-hand keys O/L are available in the mapping but
 are not selected by Preview yet. Ctrl/Alt/Shift/SYM/Fn combinations bypass this
 experimental mapping; physical long-press repeat events are ignored.
@@ -63,31 +65,78 @@ After the real device verifies basic editing, we can choose whether any stock
 cycles are worth changing. This follows the user's decision to customize only
 the physical key handling for now.
 
-## Run the probes
+## Review and verification update
 
-* Host/JVM test: `./gradlew :app:testDebugUnitTest --tests '*TwelveKeyKeymapTest'`
-* Device native probe: install the **matching debug application and androidTest
-  APKs** on an arm64 Android device, then run:
+The service configures the stock table before creating each native session,
+including after editor resets. Preview explicitly sets the composing timeout to
+zero. The production request and config are preserved, covered by
+`MozcInputProfileTest`. No custom kana tables, mode UI or main merge are added.
+
+Review found the early Preview routing bypassed `selectedReading` handling:
+a mapped character inserted without replacing the editor's selected reading,
+and Q/A moved from the native caret rather than collapsing the selection.
+Both now use the native cursor/deletion operations and the existing `applyOutput`
+batched InputConnection writer. Conversion arrows also reuse `moveSegment`.
+Mozc remains the owner of the complete composing text; the editor receives only
+returned preedit/result text. Existing synchronization handles editor caret
+changes, stale batch snapshots, and externally rewritten text. These source-level
+checks are not evidence that every Android editor behaves correctly.
+
+## Run the checks
 
 ```bash
-adb shell am instrument -w -e class dev.utmity.titanime.TwelveKeyMozcProbeTest dev.utmity.titanime.test/androidx.test.runner.AndroidJUnitRunner
+bash gradlew :app:testDebugUnitTest :app:testPreviewUnitTest :app:lintDebug :app:lintPreview :harness:lintDebug :app:assembleDebug :app:assembleRelease :app:assemblePreview :app:assembleDebugAndroidTest :harness:assembleDebug :harness:assembleDebugAndroidTest
+bash gradlew -PandroidTestBuildType=preview :app:assemblePreviewAndroidTest
 ```
 
-The normal verification GitHub workflow assembles instrumentation tests but
-does **not** execute them (no attached device). The native behavior is therefore
-**unverified on Titan 2 Elite until the instrumented probe runs**.
-Do not treat an APK compile or upstream source test as an actual device test.
+The Verify workflow runs these checks and publishes both Preview and matching
+instrumentation APKs in `debug-and-preview-device-test-apks`. Native tests now
+exercise `MozcEngine` itself (table setup, session restarts and zero timeout),
+rather than reproducing JNI request setup in the test.
 
-## Preview test workflow
+On an arm64 device, install Preview and its matching Preview test APK. Run:
 
-Build with the repository Verify workflow, download its `titan-ime-preview-safe-install`
-artifact and install the separately named Preview APK. The preview IME must be
-manually selected in Android's input method picker, with Japanese input enabled.
-It initially uses the left-hand layout (W/E/R, S/D/F, Z/X/C; Q/A arrows; T/G/V
-special keys). All kana and punctuation follow **Mozc defaults**, including
-the extra small characters and the different stock symbol cycle.
+```bash
+adb shell am instrument -w -e class dev.utmity.titanime.TwelveKeyMozcProbeTest dev.utmity.titanime.preview.test/androidx.test.runner.AndroidJUnitRunner
+```
 
-Only after native verification: test cursor insertion within composing text,
-committed-text navigation, Backspace, Space/candidates, modifier ordering, and
-absence of regressions in the existing QWERTY build. Add hand/mode switching UI
-later. This is a preliminary preview and has **not been tested on T2E hardware**.
+For actual service/InputConnection integration, also install the harness debug
+and harness test APKs, manually select **Titan IME Preview**, and run:
+
+```bash
+adb shell am instrument -w -e class dev.utmity.titanime.TwelveKeyPreviewTest dev.utmity.titanime.harness.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+The harness suite refuses to run with a different IME selected. It switches to
+Japanese with the existing default Fn+Space binding if needed and restores the
+initial language afterward. Use default shortcut settings for this suite.
+Do not run the old QWERTY harness suites against Preview.
+
+## T2E manual acceptance (still unverified)
+
+Select the separate Preview IME and Japanese mode. Keep the normal IME installed.
+
+| Operation | Expected stock-Mozc behavior |
+| --- | --- |
+| E, pause at least 1.5 s, E | き, a single composing character; also try a much longer pause |
+| Hold E | No extra cycles from repeat events; release and press advances once |
+| E, A, E | かか; A separates same-row taps without committing |
+| W, E, Q, R | あさか, with caret between さ and か |
+| Backspace at that caret | あか, with caret between あ and か |
+| Touch a caret inside あか; R | Insert さ at the touched position, no duplicated text |
+| Select か in あかさ; F; T | あばさ; both editor and Mozc selection are replaced |
+| Select part of reading; Q or A | Collapse to selection start or end |
+| W, E, Space, candidate selection, Enter | Conversion candidates, then committed text with no composing span |
+| Q/A after Enter | Move the Android editor caret through committed text |
+| F,T,T,T; W,T; G repeats; V repeats | Stock voicing, small kana, わ-row and punctuation cycles |
+| Switch field, restart input, return to Preview | New composition still uses the stock 12-key table |
+| English, password/number fields, Ctrl/Alt/Shift/SYM/Fn | Experimental mapping bypassed; existing field/shortcut policy applies |
+
+Also check long readings and multi-segment conversion with Q/A, external edits,
+app switching and the actual target editors. Use the normal debug/production IME
+for QWERTY regression verification. Right-hand mapping is maintained and unit
+tested, but its physical operation remains unverified and has no selection UI.
+
+No Android device or emulator is attached in this task environment. Native and
+service integration suites are compiled by CI, **not executed**. Passing host
+unit tests/build/lint does not establish T2E hardware or InputConnection results.
