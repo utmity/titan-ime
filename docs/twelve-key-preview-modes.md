@@ -1,5 +1,7 @@
 # Preview: physical 12-key mode switching (draft)
 
+> PR #9時点の履歴です。通常版への正式対応・現行の切替／設定は [twelve-key-production.md](twelve-key-production.md) を参照してください。
+
 This branch builds **on top of Draft PR #8**; it does not modify the main branch.
 The production Titan IME retains its existing shortcuts, Romaji/Mozc table and normal input behavior.
 

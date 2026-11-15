@@ -80,7 +80,7 @@ class InputDeviceTest {
             }
             fun toggle() {
                 vendorFn(KeyEvent.ACTION_DOWN)
-                try { key(KeyEvent.KEYCODE_SPACE) } finally { vendorFn(KeyEvent.ACTION_UP) }
+                try { key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_SHIFT_ON) } finally { vendorFn(KeyEvent.ACTION_UP) }
             }
             fun chooseSetting(label: String) {
                 context.startActivity(Intent().setClassName("dev.utmity.titanime", "dev.utmity.titanime.SettingsActivity")

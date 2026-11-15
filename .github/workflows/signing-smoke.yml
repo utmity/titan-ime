@@ -10,6 +10,12 @@ name: Signing smoke test
 # Manual dispatch only; never runs automatically.
 on:
   workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Baseline commit to compare for in-place update identity
+        required: true
+        default: e6a99893e2b1f190ef3b59de7b7a3b45e805409f
+        type: string
 
 permissions:
   contents: read
@@ -56,13 +62,22 @@ jobs:
             -storepass titan-test-pass -keypass titan-test-pass \
             -dname "CN=Titan IME signing smoke test"
           echo "TITAN_KEYSTORE_FILE=$RUNNER_TEMP/titan-test.keystore" >> "$GITHUB_ENV"
+      - name: Check out baseline while keeping the same throwaway signer
+        env:
+          BASELINE_REF: ${{ inputs.baseline_ref }}
+        run: |
+          set -euo pipefail
+          echo "SIGNING_HEAD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          git fetch origin "$BASELINE_REF"
+          git checkout --detach FETCH_HEAD
+          echo "Signing baseline: $(git rev-parse HEAD)"
       - name: First build (versionCode 20001)
         env:
           TITAN_KEYSTORE_PASSWORD: titan-test-pass
           TITAN_KEY_ALIAS: titan-test
           TITAN_KEY_PASSWORD: titan-test-pass
           TITAN_VERSION_CODE: "20001"
-        run: bash gradlew --no-daemon --console=plain :app:assembleDebug
+        run: bash gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g --console=plain :app:assembleDebug
       - name: Record first signer and versionCode
         shell: bash
         run: |
@@ -72,13 +87,16 @@ jobs:
           cat /tmp/cert-first.txt
           "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging \
             app/build/outputs/apk/debug/app-debug.apk | grep -F "versionCode='20001'"
+          "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk | grep -F "name='dev.utmity.titanime'"
+      - name: Restore candidate code
+        run: git checkout --detach "$SIGNING_HEAD_SHA"
       - name: Second build (versionCode 20002, same test key)
         env:
           TITAN_KEYSTORE_PASSWORD: titan-test-pass
           TITAN_KEY_ALIAS: titan-test
           TITAN_KEY_PASSWORD: titan-test-pass
           TITAN_VERSION_CODE: "20002"
-        run: bash gradlew --no-daemon --console=plain :app:assembleDebug
+        run: bash gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g --console=plain :app:assembleDebug :app:assembleRelease :app:assemblePreview
       - name: Assert same signer and increased versionCode
         shell: bash
         run: |
@@ -90,3 +108,18 @@ jobs:
           "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging \
             app/build/outputs/apk/debug/app-debug.apk | grep -F "versionCode='20002'"
           echo "PASS: identical signer with a higher versionCode — the second APK can update the first in place."
+      - name: Verify candidate Release and separate Preview use the same signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAPT="$ANDROID_HOME/build-tools/34.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          "$AAPT" dump badging app/build/outputs/apk/debug/app-debug.apk | grep -F "name='dev.utmity.titanime'"
+          "$AAPT" dump badging app/build/outputs/apk/release/app-release.apk | grep -F "name='dev.utmity.titanime'"
+          "$AAPT" dump badging app/build/outputs/apk/preview/app-preview.apk | grep -F "name='dev.utmity.titanime.preview'"
+          for APK in app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/preview/app-preview.apk; do
+            "$APKSIGNER" verify --print-certs "$APK" | grep -i "certificate SHA-256" > /tmp/cert-candidate.txt
+            diff /tmp/cert-first.txt /tmp/cert-candidate.txt
+            "$AAPT" dump badging "$APK" | grep -F "versionCode='20002'"
+          done
+          echo "PASS: baseline/candidate signer identical, production ID retained, Preview ID distinct. Test key only; not an installed-device update."

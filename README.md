@@ -1,5 +1,9 @@
 # Titan IME
 
+通常版・Preview共通の12キー対応を準備しています。既存環境の初期方式はQWERTYのままです。
+Fn+Spaceは入力方式、QWERTYの日英切替は標準Fn+Shift+Space／モードボタン長押し。
+方式の保存・復元、キー配列、APKと署名の注意は[通常版12キー入力](docs/twelve-key-production.md)を参照してください。
+
 ## 2026-11-05: 入力とカスタマイズ
 
 - 日本語の読み入力・変換中に、実際に押した元のローマ字を候補に表示します。タップで英字確定できます。
@@ -31,7 +35,7 @@ UIの構成案と自動入力の確認手順は[UI・自動入力レビュー](d
 | 自動入力 | 「…」から入力先へ要求、設定からAndroidのサービス選択画面へ移動 |
 | 文字変換 | 選択してFn+T（Fn+G/無効化も設定可）。Fn+J/Kで種類選択、Enter、戻るでキャンセル |
 | 音声入力 | バーのマイクから1タップ（「…」の重複項目は削除）。設定で自動／日本語優先／英語優先。初回権限許可後のみ再度開始 |
-| モード切替 | 左の「あ / A」をタップ、または従来のFn+Space |
+| 入力方式切替 | 左のモードボタンをタップ、またはFn+Space。12キー内のみの切替はP |
 | 候補一覧 | 展開ボタン→Fn+K/J→Enter。Backで閉じる。文節設定がJ/Kの変換中は一覧選択をFn+H/Lへ切替 |
 | 別IMEへの切り替え | 「…」または設定の「入力方法を切り替える」 |
 
@@ -56,7 +60,7 @@ Kana-kanji conversion, editor stability and usable physical-key settings are the
 
 | 機能 | 操作 | 動作・条件 |
 | --- | --- | --- |
-| 日英切り替え | **Fn+Space（標準）** | 設定でSym+Space／Alt+Spaceへ変更可。Ctrl+Shift+Jは廃止 |
+| QWERTY日英切替 | **Fn+Shift+Space（標準）** | QWERTY設定で変更可能。モードボタン長押しでも切替 |
 | 日本語入力 | ローマ字 | Mozcでかな入力。独自変換器は使用しない |
 | 記号 | `-` / `,` / `.` | 日本語モードで `ー` / `、` / `。`。未確定のままMozcへ入力 |
 | 括弧 | `[` / `]` | 日本語モードで `「` / `」`。その他の引用符・記号もMozcへ渡す |
@@ -87,7 +91,7 @@ Fn文節操作は変換中に限定しています。文節長を変更すると
 Androidの「設定 → システム → キーボード → 画面キーボード → Titan IME」から専用設定を開けます（端末により項目名が異なります）。AndroidへIMEのsettingsActivityとして登録しています。
 
 - **入力方法を切り替える**：Android標準のIME選択画面を開きます。候補バー・Mozc・Titanの選択状態に依存せず、有効なIMEをユーザーが選択します。他IMEの有効化や自動選択はしません。
-- 日英切り替え：Fn+Space（標準）、Sym+Space、Alt+Space。1つを選ぶと即時保存・反映。
+- 入力方式切替：標準Fn+Space。QWERTY日英切替：標準Fn+Shift+Space。それぞれ独立して設定・保存。
 - T2E内蔵キーボードのAlt：「Altで数字・記号（標準）」では実機キーマップの文字を入力します（Alt+R＝3、Alt+I/N/M＝-/,/.）。日本語テキスト欄では記号をMozcへ渡します。「Altをアプリへ渡す（Meta）」では元のAltイベントをアプリへ渡します。Ctrl+Altは常にアプリ側へ渡します。外付けキーボードにはこの文字入力処理を適用しません。
 - 文節操作：Fn+H/L（標準）またはFn+J/K。前/次のキーを変更します。縮小/拡大は両方の設定でFn+U/Oです。Spaceと重複しません。
 - 変換学習：オン（標準）／オフ。確定した変換をMozcが端末内で学習し、次回以降の候補へ反映。入力終了時に保存し、再起動後も保持します。保存量はMozc標準の管理に従います。オフにしても保存済み履歴は削除しません。
@@ -105,7 +109,7 @@ Discordの実機で確認したチャンネル名欄は非テキスト・可視�
 
 ## ユーザー辞書の使い方
 
-1. Titan IME設定 → **ユーザー辞書** → **単語を登録**を開きます。
+1. Titan IME設定 → **共通設定** → **ユーザー辞書** → **単語を登録**を開きます。
 2. 単語・読み・品詞を入力して保存します。カタカナ（半角を含む）の読みはひらがなへ正規化します。
 3. 日本語モードで読みを入力し、予測候補またはSpace変換から登録語を選びます。読みが複数文節に分かれた場合はFn+Oで登録語の長さまで伸ばしてください。
 4. 辞書一覧の単語をタップして編集・削除できます。検索欄は単語と読みを検索します。
@@ -135,7 +139,7 @@ Use JDK 17, Android SDK 35, and set ANDROID_HOME. The Gradle 8.9 wrapper builds 
 
 First build the pinned engine on Linux/WSL2 with `bash scripts/build-mozc.sh`, or download the mozc-arm64 artifact from a successful trusted GitHub Actions run in this repository. Extract it and run `./scripts/import-mozc.ps1 -Source <extracted-directory>`. The importer checks revision and checksums. Engine and dictionary binaries are ignored by Git; Gradle fails clearly if they are missing. Initial device support is arm64-v8a only.
 
-The full regression assumes Fn+Space and the H/L segment profile, normalizes English mode, disables learning for deterministic conversion checks, then enables learning to verify candidate adaptation. It finishes in English with learning on. To verify disk persistence, restart the IME process after the full run and separately run the LearningPersistenceTest instrumentation class.
+The QWERTY regression assumes QWERTY input, Fn+Shift+Space language switching and the H/L segment profile, normalizes English mode, disables learning for deterministic conversion checks, then enables learning to verify candidate adaptation. It finishes in English with learning on. To verify disk persistence, restart the IME process after the full run and separately run the LearningPersistenceTest instrumentation class.
 
 Run `./scripts/test-device.ps1 -Serial <adb-serial> -InputSequence -SelectTitanIme` to build, install, test and restore the starting IME. Titan must already be enabled. Without -SelectTitanIme, select Titan manually. The runner never enables/disables IMEs or uninstalls packages. Use -SkipInstall to test installed APKs.
 

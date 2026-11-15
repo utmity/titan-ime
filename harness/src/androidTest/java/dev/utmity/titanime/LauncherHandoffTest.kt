@@ -34,7 +34,7 @@ class LauncherHandoffTest {
                 Thread.sleep(50)
             }
             assertTrue("Proxy input ready", ready.get())
-            if (!japanese) { key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_FUNCTION_ON); switchedMode = true }
+            if (!japanese) { key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON); switchedMode = true }
             Thread.sleep(250)
             // No IME window should have been requested just for this hidden editor.
             val automation = instrumentation.uiAutomation
@@ -54,7 +54,7 @@ class LauncherHandoffTest {
                 }
             }
         } finally {
-            if (switchedMode) key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_FUNCTION_ON)
+            if (switchedMode) key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
             instrumentation.runOnMainSync { activity.finish() }
             context.unregisterReceiver(receiver)
         }

@@ -35,14 +35,14 @@ class LearningPersistenceTest {
             val deadline = android.os.SystemClock.uptimeMillis() + 15000
             while (!connected.get() && android.os.SystemClock.uptimeMillis() < deadline) Thread.sleep(100)
             assertTrue("Input connection ready", connected.get())
-            fun key(code: Int, scan: Int = 0, action: Int? = null) {
+            fun key(code: Int, scan: Int = 0, action: Int? = null, meta: Int = 0) {
                 test.runOnMainSync { assertTrue(activity.hasWindowFocus() && activity.editor.hasFocus()) }
                 assertEquals("dev.utmity.titanime/.TitanImeService", android.provider.Settings.Secure.getString(context.contentResolver, android.provider.Settings.Secure.DEFAULT_INPUT_METHOD))
                 for (a in if (action == null) listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP) else listOf(action))
-                    test.sendKeySync(KeyEvent(0, 0, a, code, 0, 0, 0, scan))
+                    test.sendKeySync(KeyEvent(0, 0, a, code, 0, meta, 0, scan))
                 test.waitForIdleSync(); Thread.sleep(100)
             }
-            fun toggle() { key(403, 251, KeyEvent.ACTION_DOWN); key(KeyEvent.KEYCODE_SPACE); key(403, 251, KeyEvent.ACTION_UP) }
+            fun toggle() { key(403, 251, KeyEvent.ACTION_DOWN); key(KeyEvent.KEYCODE_SPACE, meta = KeyEvent.META_SHIFT_ON); key(403, 251, KeyEvent.ACTION_UP) }
             if (!japanese.get()) toggle()
             "suisei".forEach { key(KeyEvent.KEYCODE_A + (it - 'a')) }
             key(KeyEvent.KEYCODE_SPACE)

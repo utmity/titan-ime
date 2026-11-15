@@ -79,9 +79,10 @@ internal data class ShortcutBinding(val keyCode: Int, val modifiers: Int) {
 internal data class ShortcutProfile(
     val language: ShortcutBinding?,
     val history: ShortcutBinding?,
-    val transform: ShortcutBinding?
+    val transform: ShortcutBinding?,
+    val qwertyLanguage: ShortcutBinding? = null
 ) {
     fun ownerOf(binding: ShortcutBinding, excluding: String): String? = listOf(
-        "language" to language, "history" to history, "transform" to transform)
+        "language" to language, "history" to history, "transform" to transform, "qwerty_language" to qwertyLanguage)
         .firstOrNull { it.first != excluding && it.second == binding }?.first
 }

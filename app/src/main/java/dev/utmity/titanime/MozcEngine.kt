@@ -12,7 +12,7 @@ class MozcEngine(private val context: Context) {
     private var twelveKeyInput = false
     private var twelveKeyAscii = false
 
-    /** Set before start(). The experimental preview uses Mozc's stock 12-key table. */
+    /** Set before start(). Twelve-key input uses Mozc's stock 12-key table. */
     fun setTwelveKeyInput(enabled: Boolean) {
         require(session == 0L) { "Change the Mozc input table before session start" }
         twelveKeyInput = enabled
