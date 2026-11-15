@@ -839,6 +839,12 @@ class TitanImeService : InputMethodService() {
             PreviewInputMode.KANA, PreviewInputMode.ENGLISH -> true
             PreviewInputMode.NUMBER_HALF, PreviewInputMode.NUMBER_FULL -> false
         }
+        // The next native session must not inherit candidate IDs or editor
+        // composition coordinates from the preceding Preview layout.
+        preedit = ""
+        output = Output.getDefaultInstance()
+        compositionStart = -1
+        selectedReading = null
         rawRomaji.invalidate()
         panel = ""; renderPanel(); refreshStrip()
     }
