@@ -82,6 +82,14 @@ class SettingsActivity : Activity() {
             group.setOnCheckedChangeListener { _, id -> ids[id]?.let(save) }
             target.addView(group)
         }
+        if (packageName == "dev.utmity.titanime.preview") {
+            choices("12キーのカーソル配置（QWERTYには適用しません）", listOf(
+                "default" to "Q＝左・A＝右 ／ O＝上・L＝下",
+                "swapped" to "Q＝上・A＝下 ／ O＝左・L＝右",
+            ), if (preferences.twelveKeySwapCursorAxes) "swapped" else "default") {
+                preferences.twelveKeySwapCursorAxes = it == "swapped"
+            }
+        }
         target = sections.getValue("物理キー")
         text("ショートカット")
         fun shortcutButton(action: String, title: String) {

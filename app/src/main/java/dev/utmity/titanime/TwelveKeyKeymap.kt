@@ -10,12 +10,9 @@ import android.view.KeyEvent
  * (1..9, 0, *, #), not characters to commit to the editor.
  */
 object TwelveKeyKeymap {
-    enum class Hand { LEFT, RIGHT }
-
     sealed interface Action {
         data class Character(val value: Char) : Action
-        data object MoveLeft : Action
-        data object MoveRight : Action
+        data class Navigate(val keyCode: Int) : Action
     }
 
     private val leftRows = intArrayOf(
@@ -29,16 +26,18 @@ object TwelveKeyKeymap {
         KeyEvent.KEYCODE_B, KeyEvent.KEYCODE_N, KeyEvent.KEYCODE_M,
     )
 
-    fun translate(keyCode: Int, hand: Hand): Action? {
-        val rows = if (hand == Hand.LEFT) leftRows else rightRows
-        val index = rows.indexOf(keyCode)
+    fun translate(keyCode: Int, swapCursorAxes: Boolean = false): Action? {
+        // Both physical halves feed the same Mozc tokens in every 12-key mode.
+        val index = leftRows.indexOf(keyCode).takeIf { it >= 0 } ?: rightRows.indexOf(keyCode)
         if (index >= 0) return Action.Character('1' + index)
         return when (keyCode) {
-            KeyEvent.KEYCODE_G -> Action.Character('0') // わ / を / ん / ー (stock table also has ゎ)
-            KeyEvent.KEYCODE_T -> Action.Character('*') // dakuten, handakuten, small kana
-            KeyEvent.KEYCODE_V -> Action.Character('#') // punctuation (stock table lacks …)
-            if (hand == Hand.LEFT) KeyEvent.KEYCODE_Q else KeyEvent.KEYCODE_O -> Action.MoveLeft
-            if (hand == Hand.LEFT) KeyEvent.KEYCODE_A else KeyEvent.KEYCODE_L -> Action.MoveRight
+            KeyEvent.KEYCODE_G -> Action.Character('0')
+            KeyEvent.KEYCODE_T -> Action.Character('*')
+            KeyEvent.KEYCODE_V -> Action.Character('#')
+            KeyEvent.KEYCODE_Q -> Action.Navigate(if (swapCursorAxes) KeyEvent.KEYCODE_DPAD_UP else KeyEvent.KEYCODE_DPAD_LEFT)
+            KeyEvent.KEYCODE_A -> Action.Navigate(if (swapCursorAxes) KeyEvent.KEYCODE_DPAD_DOWN else KeyEvent.KEYCODE_DPAD_RIGHT)
+            KeyEvent.KEYCODE_O -> Action.Navigate(if (swapCursorAxes) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_UP)
+            KeyEvent.KEYCODE_L -> Action.Navigate(if (swapCursorAxes) KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_DOWN)
             else -> null
         }
     }

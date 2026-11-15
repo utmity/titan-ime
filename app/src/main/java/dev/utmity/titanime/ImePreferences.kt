@@ -24,6 +24,7 @@ internal class ImePreferences(context: Context) {
     private var cachedEditing = true
     private var cachedClipboardKey = "v"
     private var cachedEditingLayout = "hjkl"
+    private var cachedTwelveKeySwapCursorAxes = false
     private var cachedWordDelete = false
     private var cachedAltText = true
     private var cachedPrediction = true
@@ -64,6 +65,7 @@ internal class ImePreferences(context: Context) {
         cachedEditing = store.getBoolean("editing", true)
         cachedClipboardKey = store.getString("clipboard_key", "v") ?: "v"
         cachedEditingLayout = store.getString("editing_layout", "hjkl") ?: "hjkl"
+        cachedTwelveKeySwapCursorAxes = store.getBoolean("twelve_key_swap_cursor_axes", false)
         cachedWordDelete = store.getBoolean("word_delete", false)
         cachedAltText = store.getBoolean("alt_text", true)
         cachedPrediction = store.getBoolean("prediction", true)
@@ -93,6 +95,7 @@ internal class ImePreferences(context: Context) {
             "editing" -> cachedEditing = store.getBoolean(key, true)
             "clipboard_key" -> cachedClipboardKey = store.getString(key, "v") ?: "v"
             "editing_layout" -> cachedEditingLayout = store.getString(key, "hjkl") ?: "hjkl"
+            "twelve_key_swap_cursor_axes" -> cachedTwelveKeySwapCursorAxes = store.getBoolean(key, false)
             "word_delete" -> cachedWordDelete = store.getBoolean(key, false)
             "alt_text" -> cachedAltText = store.getBoolean(key, true)
             "prediction" -> cachedPrediction = store.getBoolean(key, true)
@@ -126,6 +129,9 @@ internal class ImePreferences(context: Context) {
     var editingLayout: String
         get() { ensureLoaded(); return cachedEditingLayout }
         set(value) { cachedEditingLayout = value; store.edit().putString("editing_layout", value).apply() }
+    var twelveKeySwapCursorAxes: Boolean
+        get() { ensureLoaded(); return cachedTwelveKeySwapCursorAxes }
+        set(value) { cachedTwelveKeySwapCursorAxes = value; store.edit().putBoolean("twelve_key_swap_cursor_axes", value).apply() }
     var wordDelete: Boolean
         get() { ensureLoaded(); return cachedWordDelete }
         set(value) { cachedWordDelete = value; store.edit().putBoolean("word_delete", value).apply() }

@@ -36,7 +36,6 @@ class TitanImeService : InputMethodService() {
     private var engine: MozcEngine? = null
     // Experimental, separately installable preview only. Production key routing is untouched.
     private val twelveKeyPreview by lazy { packageName == "dev.utmity.titanime.preview" }
-    private val twelveKeyHand = TwelveKeyKeymap.Hand.LEFT
     private var previewMode = PreviewInputMode.KANA
     private val previewNumericCycle = PreviewNumericCycle()
     private var japanese = false
@@ -434,7 +433,9 @@ class TitanImeService : InputMethodService() {
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
             attribute?.packageName == "dev.utmity.titanime.harness") {
             sendBroadcast(android.content.Intent("dev.utmity.titanime.INPUT_READY")
-                .setPackage("dev.utmity.titanime.harness").putExtra("japanese", japanese))
+                .setPackage("dev.utmity.titanime.harness").putExtra("japanese", japanese)
+                .putExtra("preview_mode", if (twelveKeyPreview) previewMode.name else "")
+                .putExtra("twelve_key_swap_cursor_axes", preferences.twelveKeySwapCursorAxes))
         }
     }
 
@@ -1228,7 +1229,7 @@ class TitanImeService : InputMethodService() {
             previewNumericCycle.reset()
             return true
         }
-        val action = TwelveKeyKeymap.translate(keyCode, twelveKeyHand)
+        val action = TwelveKeyKeymap.translate(keyCode, preferences.twelveKeySwapCursorAxes)
         if (action == null) {
             if (numeric) finishPreviewNumeric(ic)
             return false
@@ -1253,11 +1254,9 @@ class TitanImeService : InputMethodService() {
                         ic.setComposingText(value, 1)
                     }
                 }
-                TwelveKeyKeymap.Action.MoveLeft, TwelveKeyKeymap.Action.MoveRight -> {
+                is TwelveKeyKeymap.Action.Navigate -> {
                     finishPreviewNumeric(ic)
-                    val direction = if (action == TwelveKeyKeymap.Action.MoveLeft)
-                        KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
-                    EditingBindings.send(ic, direction, event)
+                    EditingBindings.send(ic, action.keyCode, event)
                 }
             }
             return true
@@ -1270,21 +1269,16 @@ class TitanImeService : InputMethodService() {
                 val result = engine!!.key(MozcKey.newBuilder().setKeyCode(action.value.code).build())
                 applyOutput(ic, result)
             }
-            TwelveKeyKeymap.Action.MoveLeft, TwelveKeyKeymap.Action.MoveRight -> {
-                val left = action == TwelveKeyKeymap.Action.MoveLeft
-                val direction = if (left) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
-                val range = selectedReading
-                if (range != null) {
-                    val offset = if (left) range.first else range.second
-                    selectedReading = null
-                    engine!!.moveCursor(preedit.codePointCount(0, offset)).let { applyOutput(ic, it) }
-                } else if (output.preedit.hasHighlightedPosition()) {
-                    moveSegment(if (left) MozcKey.SpecialKey.LEFT else MozcKey.SpecialKey.RIGHT)
-                } else if (preedit.isNotEmpty()) {
-                    val special = if (left) MozcKey.SpecialKey.LEFT else MozcKey.SpecialKey.RIGHT
-                    val result = engine!!.key(MozcKey.newBuilder().setSpecialKey(special).build())
-                    applyOutput(ic, result)
-                } else EditingBindings.send(ic, direction, event)
+            is TwelveKeyKeymap.Action.Navigate -> {
+                // Reuse the physical DPAD path: reading selection/cursor,
+                // same-row delimiter, candidates and conversion segments all
+                // keep the existing Mozc behavior. DPAD keys never remap here.
+                val navigation = KeyEvent(event.downTime, event.eventTime, event.action,
+                    action.keyCode, event.repeatCount, event.metaState,
+                    event.deviceId, event.scanCode, event.flags, event.source)
+                if (!handleKey(action.keyCode, navigation)) {
+                    EditingBindings.send(ic, action.keyCode, navigation)
+                }
             }
         }
         return true
