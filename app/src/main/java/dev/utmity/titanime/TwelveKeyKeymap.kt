@@ -11,6 +11,7 @@ import android.view.KeyEvent
  */
 object TwelveKeyKeymap {
     sealed interface Action {
+        data object NextMode : Action
         data class Character(val value: Char) : Action
         data class Navigate(val keyCode: Int) : Action
     }
@@ -31,6 +32,7 @@ object TwelveKeyKeymap {
         val index = leftRows.indexOf(keyCode).takeIf { it >= 0 } ?: rightRows.indexOf(keyCode)
         if (index >= 0) return Action.Character('1' + index)
         return when (keyCode) {
+            KeyEvent.KEYCODE_P -> Action.NextMode
             KeyEvent.KEYCODE_G -> Action.Character('0')
             KeyEvent.KEYCODE_T -> Action.Character('*')
             KeyEvent.KEYCODE_V -> Action.Character('#')

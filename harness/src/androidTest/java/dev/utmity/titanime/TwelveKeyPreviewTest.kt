@@ -232,4 +232,41 @@ class TwelveKeyPreviewTest {
         }
     }
 
+    @Test fun pCommitsEachTwelveKeyModeSkipsQwertyAndIgnoresRepeat() {
+        for ((mode, text, next) in listOf(
+            Triple("KANA", "か", "ENGLISH"), Triple("ENGLISH", "a", "NUMBER_HALF"),
+            Triple("NUMBER_HALF", "2", "NUMBER_FULL"), Triple("NUMBER_FULL", "２", "KANA")
+        )) {
+            setMode(mode)
+            instrumentation.runOnMainSync { activity.editor.setText("") }
+            reconnect()
+            key(KeyEvent.KEYCODE_E)
+            expect(text, composing = mode != "NUMBER_HALF")
+            key(KeyEvent.KEYCODE_P, repeat = 1)
+            expect(text, composing = mode != "NUMBER_HALF")
+            key(KeyEvent.KEYCODE_P)
+            expect(text, composing = false)
+            reconnect()
+            assertEquals(next, previewMode)
+        }
+        setMode("QWERTY")
+        instrumentation.runOnMainSync { activity.editor.setText("") }
+        reconnect()
+        key(KeyEvent.KEYCODE_P)
+        instrumentation.runOnMainSync { assertEquals("p", activity.editor.text.toString()) }
+        reconnect()
+        assertEquals("QWERTY", previewMode)
+    }
+
+    @Test fun pPreservesConvertedCandidateBeforeChangingMode() {
+        key(KeyEvent.KEYCODE_W); key(KeyEvent.KEYCODE_E); key(KeyEvent.KEYCODE_SPACE)
+        var converted = ""
+        instrumentation.runOnMainSync { converted = activity.editor.text.toString() }
+        assertTrue(converted.isNotEmpty())
+        key(KeyEvent.KEYCODE_P)
+        expect(converted, composing = false)
+        reconnect()
+        assertEquals("ENGLISH", previewMode)
+    }
+
 }

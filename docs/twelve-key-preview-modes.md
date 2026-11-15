@@ -119,3 +119,68 @@ comparing against the user's actual Android keyboard.
    Backspace, selection replacement, space/enter, and field changes.
 5. The ordinary application must not change behavior or latency.
 6. This branch should remain a **Draft** until CI and T2E tests pass.
+
+## P switching and separate settings pages
+
+P cycles **Kana → English → halfwidth numbers → fullwidth numbers/symbols → Kana**.
+It never selects QWERTY, and in QWERTY P remains a letter. Only a deliberate
+unmodified press switches; repeat events and modifier combinations do not.
+Before switching, the same existing commit path resolves the current Mozc
+reading/candidate or finishes the numeric composing span. The configured mode
+shortcut (default Fn+Space) and screen mode button retain the full five-mode
+cycle, including QWERTY.
+
+Ctrl+Space and Shift+Ctrl+Space are passed to Android before Preview shortcut
+matching, including when an older stored shortcut conflicts. They cannot be
+newly assigned in Preview settings. Titan does not select an IME itself.
+Static routing and chord tests cover the application side; actual Android IME
+switching, interception order and held-key events still need T2E/OS verification.
+Production shortcut routing is unchanged.
+
+Settings now opens independent activity pages with Android Back navigation:
+
+- **QWERTY入力設定**: Preview's existing QWERTY Japanese/English preference,
+  ordinary Fn cursor editing/layout, Alt text policy, word deletion.
+- **ガラケー入力（12キー）設定** (Preview only): P switching, both character halves,
+  numeric/English/kana operations, and the cursor-axis setting.
+- **共通設定**: input/language shortcut, history/transform shortcuts, segment
+  shortcuts, candidate bar, Mozc prediction/correction/learning, dictionary,
+  clipboard history, voice and autofill.
+- **操作ガイド**: separate QWERTY and (Preview only) twelve-key guide pages.
+
+All existing preference keys, stores, defaults and clipboard data remain in
+place; navigation performs no migration or clearing. A setting appears on one
+page only. The QWERTY language selector in Preview uses the existing `japanese`
+preference and updates an active QWERTY session after committing its reading;
+it does not change the language of the four twelve-key modes. The normal app's
+language toggle behavior is unchanged. Page identity is restored on recreation,
+and stable control IDs restore view/scroll state. Direct links to twelve-key
+pages resolve to Home in the normal app.
+
+Current-mode text comes from the active service session, including the actual
+Preview layout and QWERTY language. With no editor connected it says so, and
+labels the saved QWERTY language separately. It no longer describes the saved
+QWERTY preference as the active twelve-key mode. Status is published only on
+session/mode transitions, never by storing state for every key.
+
+Added checks: JVM mode-cycle/status/navigation/chord tests; device settings
+navigation/back/recreation/saved-selection/unique-ownership tests; P repeat,
+commit/candidate preservation and QWERTY exclusion in the harness. Existing
+settings-driven harness and dictionary UI tests use the new page routes.
+
+T2E acceptance beyond CI (instrumentation APK builds are not execution):
+
+1. In each twelve-key mode type a character, press/hold/release P, verify exactly
+   one transition and committed text; verify fullwidth mode returns to Kana.
+2. Convert kana with Space, select a candidate, then P: keep that candidate.
+3. Fn+Space and screen button still reach QWERTY; QWERTY P types `p`.
+4. With another IME enabled, Ctrl+Space (and Shift+Ctrl+Space where supported)
+   switches IMEs without cycling Titan's modes. Try composing text, numeric
+   cycling and held/released modifiers. OS interception may prevent Titan from
+   receiving the chord; that is expected, and must be distinguished from a Titan
+   shortcut consuming it. Check both physical key event order and OS settings.
+5. Navigate each settings page, change values, Back, reopen, rotate/recreate,
+   and force-stop/reopen settings; verify old values survive. Check both cursor
+   layouts and QWERTY language selection. Check the actual mode/status text.
+6. On the normal app confirm twelve-key pages/guide/P are absent; verify normal
+   Japanese/English shortcut, ordinary QWERTY editing, dictionary and shared tools.

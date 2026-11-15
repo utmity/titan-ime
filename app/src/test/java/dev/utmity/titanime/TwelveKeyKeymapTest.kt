@@ -29,6 +29,11 @@ class TwelveKeyKeymapTest {
         }
     }
 
+    @Test fun pIsModeActionWithEitherCursorSetting() {
+        assertEquals(TwelveKeyKeymap.Action.NextMode, TwelveKeyKeymap.translate(KeyEvent.KEYCODE_P))
+        assertEquals(TwelveKeyKeymap.Action.NextMode, TwelveKeyKeymap.translate(KeyEvent.KEYCODE_P, true))
+    }
+
     @Test fun defaultAndSwappedCursorAxes() {
         val codes = listOf(KeyEvent.KEYCODE_Q, KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_O, KeyEvent.KEYCODE_L)
         val defaults = listOf(KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,

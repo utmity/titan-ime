@@ -12,6 +12,15 @@ internal enum class PreviewInputMode(val badge: String, val description: String)
     NUMBER_FULL("１２３", "12キー数字・全角と記号");
 
     fun next(): PreviewInputMode = entries[(ordinal + 1) % entries.size]
+
+    fun nextTwelveKey(): PreviewInputMode = when (this) {
+        QWERTY -> QWERTY // P never enters or leaves QWERTY.
+        NUMBER_FULL -> KANA
+        else -> next()
+    }
+
+    fun status(japanese: Boolean): String = if (this == QWERTY)
+        "QWERTY・${if (japanese) "日本語" else "英語"}" else description
 }
 
 /**

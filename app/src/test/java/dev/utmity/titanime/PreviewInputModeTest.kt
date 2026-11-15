@@ -4,6 +4,27 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class PreviewInputModeTest {
+    @Test fun pCyclesOnlyTwelveKeyModesAndNeverLeavesQwerty() {
+        var mode = PreviewInputMode.KANA
+        repeat(3) {
+            for (expected in listOf(PreviewInputMode.ENGLISH, PreviewInputMode.NUMBER_HALF,
+                PreviewInputMode.NUMBER_FULL, PreviewInputMode.KANA)) {
+                mode = mode.nextTwelveKey()
+                assertEquals(expected, mode)
+            }
+        }
+        assertEquals(PreviewInputMode.QWERTY, PreviewInputMode.QWERTY.nextTwelveKey())
+    }
+
+    @Test fun statusDistinguishesActualTwelveKeyModeFromQwertyLanguagePreference() {
+        for (mode in PreviewInputMode.entries.filter { it != PreviewInputMode.QWERTY }) {
+            assertEquals(mode.description, mode.status(false))
+            assertEquals(mode.description, mode.status(true))
+        }
+        assertEquals("QWERTY・日本語", PreviewInputMode.QWERTY.status(true))
+        assertEquals("QWERTY・英語", PreviewInputMode.QWERTY.status(false))
+    }
+
     @Test fun modesCycleIncludingQwerty() {
         var mode = PreviewInputMode.QWERTY
         val expected = listOf(
