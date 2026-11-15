@@ -49,9 +49,7 @@ class TwelveKeyMozcProbeTest {
             session = evaluate(Input.newBuilder().setType(Input.CommandType.CREATE_SESSION)).id
             assertTrue("Could not create Mozc native session", session != 0L)
             command(SessionCommand.CommandType.TURN_ON_IME)
-            command(SessionCommand.CommandType.SWITCH_COMPOSITION_MODE)
-            // SWITCH_COMPOSITION_MODE above defaults to HIRAGANA in the proto;
-            // use the explicit mode below so the test never depends on defaults.
+            // Set mode explicitly so the test never depends on a default.
             evaluate(Input.newBuilder().setType(Input.CommandType.SEND_COMMAND).setId(session)
                 .setCommand(SessionCommand.newBuilder()
                     .setType(SessionCommand.CommandType.SWITCH_COMPOSITION_MODE)
