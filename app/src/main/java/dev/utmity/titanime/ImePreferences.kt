@@ -32,8 +32,10 @@ internal class ImePreferences(context: Context) {
     private var cachedLearning = true
     private var cachedToggle = "fn"
     private var cachedSegments = "hl"
+    private var cachedInputMode = InputMode.QWERTY
     private var cachedJapanese = false
     private var cachedToolbarMode = "always"
+    private var cachedShortcutQwertyLanguage: String? = null
     private var cachedShortcutLanguage: String? = null
     private var cachedShortcutHistory: String? = null
     private var cachedShortcutTransform: String? = null
@@ -73,6 +75,8 @@ internal class ImePreferences(context: Context) {
         cachedLearning = store.getBoolean("learning", true)
         cachedToggle = store.getString("toggle", "fn") ?: "fn"
         cachedSegments = store.getString("segments", "hl") ?: "hl"
+        cachedInputMode = InputMode.restore(store.getString("input_mode", null))
+        cachedShortcutQwertyLanguage = store.getString("shortcut_qwerty_language", null)
         cachedJapanese = store.getBoolean("japanese", false)
         cachedToolbarMode = store.getString("toolbar_mode", "always") ?: "always"
         cachedShortcutLanguage = store.getString("shortcut_language", null)
@@ -106,6 +110,8 @@ internal class ImePreferences(context: Context) {
                 cachedSegments = store.getString(key, "hl") ?: "hl"
                 cachedSegmentBindings = null
             }
+            "input_mode" -> cachedInputMode = InputMode.restore(store.getString(key, null))
+            "shortcut_qwerty_language" -> cachedShortcutQwertyLanguage = store.getString(key, null)
             "japanese" -> cachedJapanese = store.getBoolean(key, false)
             "toolbar_mode" -> cachedToolbarMode = store.getString(key, "always") ?: "always"
             "shortcut_language" -> cachedShortcutLanguage = store.getString(key, null)
@@ -153,6 +159,14 @@ internal class ImePreferences(context: Context) {
     var segments: String
         get() { ensureLoaded(); return cachedSegments }
         set(value) { cachedSegments = value; cachedSegmentBindings = null; store.edit().putString("segments", value).apply() }
+    var inputMode: InputMode
+        get() { ensureLoaded(); return cachedInputMode }
+        set(value) {
+            ensureLoaded()
+            if (cachedInputMode == value) return
+            cachedInputMode = value
+            store.edit().putString("input_mode", value.name).apply()
+        }
     var japanese: Boolean
         get() { ensureLoaded(); return cachedJapanese }
         set(value) { cachedJapanese = value; store.edit().putBoolean("japanese", value).apply() }
@@ -165,12 +179,13 @@ internal class ImePreferences(context: Context) {
         }
 
     fun shortcut(action: String): ShortcutBinding? {
-        require(action in setOf("language", "history", "transform"))
+        require(action in setOf("language", "history", "transform", "qwerty_language"))
         ensureLoaded()
         val saved = when (action) {
             "language" -> cachedShortcutLanguage
             "history" -> cachedShortcutHistory
-            else -> cachedShortcutTransform
+            "transform" -> cachedShortcutTransform
+            else -> cachedShortcutQwertyLanguage
         }
         if (saved == "off") return null
         if (saved != null) return ShortcutBinding.decode(saved)
@@ -186,6 +201,11 @@ internal class ImePreferences(context: Context) {
                 "b" -> ShortcutBinding(KeyEvent.KEYCODE_B, ShortcutBinding.FN)
                 else -> ShortcutBinding(KeyEvent.KEYCODE_V, ShortcutBinding.FN)
             }
+            "qwerty_language" -> {
+                val binding = ShortcutBinding(KeyEvent.KEYCODE_SPACE, ShortcutBinding.FN or ShortcutBinding.SHIFT)
+                // Do not steal a chord already customized by an existing user.
+                if (listOf("language", "history", "transform").any { shortcut(it) == binding }) null else binding
+            }
             else -> when (cachedTransformKey) {
                 "off" -> null
                 "g" -> ShortcutBinding(KeyEvent.KEYCODE_G, ShortcutBinding.FN)
@@ -195,19 +215,20 @@ internal class ImePreferences(context: Context) {
     }
 
     fun setShortcut(action: String, binding: ShortcutBinding?) {
-        require(action in setOf("language", "history", "transform"))
+        require(action in setOf("language", "history", "transform", "qwerty_language"))
         require(binding == null || !binding.reserved())
         val encoded = binding?.encode() ?: "off"
         ensureLoaded()
         when (action) {
             "language" -> cachedShortcutLanguage = encoded
             "history" -> cachedShortcutHistory = encoded
-            else -> cachedShortcutTransform = encoded
+            "transform" -> cachedShortcutTransform = encoded
+            else -> cachedShortcutQwertyLanguage = encoded
         }
         store.edit().putString("shortcut_$action", encoded).apply()
     }
 
-    fun shortcuts() = ShortcutProfile(shortcut("language"), shortcut("history"), shortcut("transform"))
+    fun shortcuts() = ShortcutProfile(shortcut("language"), shortcut("history"), shortcut("transform"), shortcut("qwerty_language"))
 
     fun matchesToggle(event: KeyEvent, fn: Boolean): Boolean {
         if (event.keyCode != KeyEvent.KEYCODE_SPACE || event.isShiftPressed || event.isCtrlPressed || event.isMetaPressed) return false

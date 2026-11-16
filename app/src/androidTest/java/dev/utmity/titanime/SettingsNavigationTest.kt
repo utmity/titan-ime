@@ -15,7 +15,6 @@ import org.junit.Test
 class SettingsNavigationTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
-    private val preview get() = context.packageName.endsWith(".preview")
     private fun views(view: View): List<View> = listOf(view) +
         if (view is ViewGroup) (0 until view.childCount).flatMap { views(view.getChildAt(it)) } else emptyList()
     private fun views(activity: SettingsActivity) = views(activity.window.decorView)
@@ -28,11 +27,11 @@ class SettingsNavigationTest {
                 val labels = views(activity).filterIsInstance<Button>().map { it.text.toString() }
                 assertTrue(labels.contains("QWERTY入力設定"))
                 assertTrue(labels.contains("共通設定"))
-                assertEquals(preview, labels.contains("ガラケー入力（12キー）設定"))
+                assertEquals(true, labels.contains("ガラケー入力（12キー）設定"))
                 assertFalse(labels.any { it.startsWith("＋ ") })
                 assertTrue(views(activity).none { it is RadioButton })
             }
-            for (page in SettingsPage.homePages(preview)) {
+            for (page in SettingsPage.homePages()) {
                 val monitor = instrumentation.addMonitor(SettingsActivity::class.java.name, null, false)
                 try {
                     scenario.onActivity { activity ->
@@ -55,11 +54,11 @@ class SettingsNavigationTest {
     @Test fun choicePersistsAcrossNavigationAndActivityRecreation() {
         val preferences = ImePreferences(context)
         val store = preferences.store
-        val key = if (preview) "twelve_key_swap_cursor_axes" else "editing_layout"
+        val key = "twelve_key_swap_cursor_axes"
         val original = store.all[key]
         val unrelated = store.getBoolean("prediction", true)
-        val page = if (preview) SettingsPage.TWELVE_KEY else SettingsPage.QWERTY
-        val choice = if (preview) "$key:swapped" else "$key:wasd"
+        val page = SettingsPage.TWELVE_KEY
+        val choice = "$key:swapped"
         fun assertChoice(activity: SettingsActivity) {
             assertEquals(page.title, activity.title.toString())
             assertTrue(views(activity).filterIsInstance<RadioButton>().single { it.tag == choice }.isChecked)
@@ -71,7 +70,7 @@ class SettingsNavigationTest {
                     views(activity).filterIsInstance<RadioButton>().single { it.tag == choice }.performClick()
                     assertChoice(activity)
                 }
-                assertEquals(if (preview) true else "wasd", store.all[key])
+                assertEquals(true, store.all[key])
                 scenario.recreate()
                 scenario.onActivity { assertChoice(it) }
             }
@@ -113,7 +112,7 @@ class SettingsNavigationTest {
 
     @Test fun pagesOwnSettingsOnceAndGuidesMatchAvailableInputMethods() {
         val ownership = mutableMapOf<String, SettingsPage>()
-        for (page in SettingsPage.homePages(preview)) {
+        for (page in SettingsPage.homePages()) {
             ActivityScenario.launch<SettingsActivity>(intent(page)).use { scenario ->
                 scenario.onActivity { activity ->
                     views(activity).filter { it is android.widget.RadioGroup }.forEach {
@@ -123,22 +122,15 @@ class SettingsNavigationTest {
                     if (page == SettingsPage.GUIDE) {
                         val labels = views(activity).filterIsInstance<Button>().map { it.text.toString() }
                         assertTrue(labels.contains("QWERTYの操作ガイド"))
-                        assertEquals(preview, labels.contains("12キーの操作ガイド"))
+                        assertEquals(true, labels.contains("12キーの操作ガイド"))
                     }
                 }
             }
         }
         assertEquals(SettingsPage.QWERTY, ownership["editing_layout"])
         assertEquals(SettingsPage.COMMON, ownership["prediction"])
-        if (preview) assertEquals(SettingsPage.TWELVE_KEY, ownership["twelve_key_swap_cursor_axes"])
-        else assertFalse(ownership.containsKey("twelve_key_swap_cursor_axes"))
-        if (!preview) {
-            ActivityScenario.launch<SettingsActivity>(intent(SettingsPage.TWELVE_KEY)).use { scenario ->
-                scenario.onActivity { activity ->
-                    assertEquals(SettingsPage.HOME.title, activity.title.toString())
-                    assertFalse(views(activity).filterIsInstance<TextView>().any { it.text.toString().contains("P：かな") })
-                }
-            }
-        }
+        assertEquals(SettingsPage.TWELVE_KEY, ownership["twelve_key_swap_cursor_axes"])
+        assertEquals(SettingsPage.COMMON, ownership["input_mode"])
+        assertEquals(SettingsPage.QWERTY, ownership["japanese"])
     }
 }

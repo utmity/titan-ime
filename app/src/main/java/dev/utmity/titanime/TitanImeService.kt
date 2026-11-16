@@ -28,7 +28,11 @@ class TitanImeService : InputMethodService() {
     private var toolbarRow: LinearLayout? = null
     private var toolbarSpacer: View? = null
     private fun onPreferencesChanged(key: String?) {
-        if (twelveKeyPreview && previewMode == PreviewInputMode.QWERTY && (key == null || key == "japanese")) {
+        if (key == null || key == "input_mode") {
+            val selected = preferences.inputMode
+            if (selected != inputMode) changeInputMode(selected, persist = false)
+        }
+        if (inputMode == InputMode.QWERTY && japanese != preferences.japanese && (key == null || key == "japanese")) {
             if (currentInputStarted && !directField) currentInputConnection?.let { commitComposition(it) }
             japanese = preferences.japanese
             if (currentInputStarted) publishInputMode()
@@ -40,10 +44,8 @@ class TitanImeService : InputMethodService() {
         if (key == null || key == "toolbar_mode") refreshStrip()
     }
     private var engine: MozcEngine? = null
-    // Experimental, separately installable preview only. Production key routing is untouched.
-    private val twelveKeyPreview by lazy { packageName == "dev.utmity.titanime.preview" }
-    private var previewMode = PreviewInputMode.KANA
-    private val previewNumericCycle = PreviewNumericCycle()
+    private var inputMode = InputMode.QWERTY
+    private val numericCycle = TwelveKeyNumericCycle()
     private var japanese = false
     private var directField = false
     private var selectedReading: Pair<Int, Int>? = null
@@ -151,11 +153,12 @@ class TitanImeService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         clipboard.addPrimaryClipChangedListener(clipListener)
-        japanese = if (twelveKeyPreview) true else preferences.japanese
+        inputMode = preferences.inputMode
+        japanese = inputMode.japanese(preferences.japanese)
         shortcutProfile = preferences.shortcuts()
         preferences.changeListener = { key -> onPreferencesChanged(key) }
         try {
-            engine = MozcEngine(this).also { it.setTwelveKeyInput(twelveKeyPreview) }
+            engine = MozcEngine(this)
         }
         catch (error: Exception) { android.util.Log.e("TitanImeProbe", "Mozc initialization failed", error) }
         catch (error: LinkageError) { android.util.Log.e("TitanImeProbe", "Mozc native library unavailable", error) }
@@ -234,10 +237,10 @@ class TitanImeService : InputMethodService() {
         voice.cancel(); inlineVisible = false
         panel = ""; inlineBatch?.cancel(); inlineBatch = null; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
         traceState { "finishInput" }
-        if (twelveKeyPreview) currentInputConnection?.let { finishPreviewNumeric(it) }
+        currentInputConnection?.let { finishNumeric(it) }
         engine?.close()
         engine?.sync()
-        previewNumericCycle.reset()
+        numericCycle.reset()
         rawRomaji.invalidate()
         preedit = ""
         compositionStart = -1
@@ -338,7 +341,12 @@ class TitanImeService : InputMethodService() {
         val bar = LinearLayout(this@TitanImeService).apply {
             gravity = android.view.Gravity.CENTER_VERTICAL
             minimumHeight = dp(48)
-            modeButton = panelButton("あ") { toggleLanguage() }.apply { gravity = android.view.Gravity.CENTER }
+            modeButton = panelButton("あ") { advanceInputMode() }.apply {
+                gravity = android.view.Gravity.CENTER
+                setOnLongClickListener {
+                    if (inputMode == InputMode.QWERTY) { toggleLanguage(); true } else false
+                }
+            }
             addView(modeButton, LinearLayout.LayoutParams(dp(48), -1))
             addView(scroll, LinearLayout.LayoutParams(0, -2, 1f))
             expandButton = panelButton("⌃") { toggleCandidates() }.apply { gravity = android.view.Gravity.CENTER }
@@ -404,18 +412,9 @@ class TitanImeService : InputMethodService() {
         panel = ""; inlineBatch?.cancel(); inlineBatch = null; supportPanel?.removeAllViews(); autofillRow?.removeAllViews()
         super.onStartInput(attribute, restarting)
         engine?.setLearning(preferences.learning)
-        if (twelveKeyPreview) {
-            engine?.close()
-            engine?.setTwelveKeyInput(previewMode == PreviewInputMode.KANA || previewMode == PreviewInputMode.ENGLISH)
-            engine?.setTwelveKeyAscii(previewMode == PreviewInputMode.ENGLISH)
-        }
-        engine?.start()
-        if (twelveKeyPreview) japanese = when (previewMode) {
-            PreviewInputMode.QWERTY -> preferences.japanese
-            PreviewInputMode.KANA, PreviewInputMode.ENGLISH -> true
-            PreviewInputMode.NUMBER_HALF, PreviewInputMode.NUMBER_FULL -> false
-        }
-        previewNumericCycle.reset()
+        inputMode = preferences.inputMode
+        startModeSession()
+        numericCycle.reset()
         rawRomaji.invalidate()
         preedit = ""
         compositionStart = -1
@@ -443,7 +442,7 @@ class TitanImeService : InputMethodService() {
             attribute?.packageName == "dev.utmity.titanime.harness") {
             sendBroadcast(android.content.Intent("dev.utmity.titanime.INPUT_READY")
                 .setPackage("dev.utmity.titanime.harness").putExtra("japanese", japanese)
-                .putExtra("preview_mode", if (twelveKeyPreview) previewMode.name else "")
+                .putExtra("input_mode", inputMode.name)
                 .putExtra("twelve_key_swap_cursor_axes", preferences.twelveKeySwapCursorAxes))
         }
     }
@@ -557,9 +556,9 @@ class TitanImeService : InputMethodService() {
         toolbarSpacer?.visibility = if (toolbarNeeded) View.VISIBLE else View.GONE
         menuButton?.visibility = if (!directField || inlineVisible) View.VISIBLE else View.GONE
         modeButton?.apply {
-            text = if (twelveKeyPreview) previewMode.badge else if (japanese) "あ" else "A"
-            contentDescription = if (twelveKeyPreview) "${previewMode.description}・次の入力モードへ切替"
-                else if (japanese) "日本語モード・切替" else "英語モード・切替"
+            text = if (inputMode == InputMode.QWERTY) { if (japanese) "Qあ" else "QA" } else inputMode.badge
+            contentDescription = "${inputMode.status(japanese)}・次の入力方式へ切替" +
+                if (inputMode == InputMode.QWERTY) "・長押しで日英切替" else ""
             visibility = if (directField) View.GONE else View.VISIBLE
         }
         updateVoiceButton()
@@ -826,49 +825,53 @@ class TitanImeService : InputMethodService() {
             contentDescription = if (voice.active) "音声入力を中止" else "音声入力"
         }
     }
-    private fun finishPreviewNumeric(ic: InputConnection) {
-        if (previewNumericCycle.key == null) return
+    private fun finishNumeric(ic: InputConnection) {
+        if (numericCycle.key == null) return
         ic.finishComposingText()
-        previewNumericCycle.reset()
+        numericCycle.reset()
     }
 
     private fun publishInputMode() {
-        InputModeStatus.active = if (directField) "直接入力欄" else
-            if (twelveKeyPreview) previewMode.status(japanese)
-            else "QWERTY・${if (japanese) "日本語" else "英語"}"
+        InputModeStatus.active = if (directField) "直接入力欄" else inputMode.status(japanese)
     }
 
-    private fun advancePreviewMode(withinTwelveKey: Boolean = false) {
-        if (!twelveKeyPreview || directField || engine == null) return
-        val ic = currentInputConnection ?: return
-        voice.cancel()
-        if (previewMode == PreviewInputMode.KANA || previewMode == PreviewInputMode.ENGLISH) {
-            commitComposition(ic)
-        } else finishPreviewNumeric(ic)
-        previewMode = if (withinTwelveKey) previewMode.nextTwelveKey() else previewMode.next()
+    private fun startModeSession() {
         engine?.close()
-        engine?.setTwelveKeyInput(previewMode == PreviewInputMode.KANA || previewMode == PreviewInputMode.ENGLISH)
-        engine?.setTwelveKeyAscii(previewMode == PreviewInputMode.ENGLISH)
+        engine?.setTwelveKeyInput(inputMode.usesTwelveKeyTable)
+        engine?.setTwelveKeyAscii(inputMode == InputMode.ENGLISH)
         engine?.start()
-        japanese = when (previewMode) {
-            PreviewInputMode.QWERTY -> preferences.japanese
-            PreviewInputMode.KANA, PreviewInputMode.ENGLISH -> true
-            PreviewInputMode.NUMBER_HALF, PreviewInputMode.NUMBER_FULL -> false
+        japanese = inputMode.japanese(preferences.japanese)
+    }
+
+    private fun changeInputMode(selected: InputMode, persist: Boolean = true) {
+        if (selected == inputMode) return
+        voice.cancel()
+        currentInputConnection?.let { ic ->
+            if (inputMode.usesTwelveKeyTable || inputMode == InputMode.QWERTY) commitComposition(ic)
+            else finishNumeric(ic)
         }
-        // The next native session must not inherit candidate IDs or editor
-        // composition coordinates from the preceding Preview layout.
+        // Change the field before persisting: the preference callback then
+        // observes the already-applied selection and cannot commit twice.
+        inputMode = selected
+        if (persist) preferences.inputMode = selected
+        if (currentInputStarted) startModeSession()
         preedit = ""
         output = Output.getDefaultInstance()
         compositionStart = -1
         selectedReading = null
         rawRomaji.invalidate()
-        publishInputMode()
+        numericCycle.reset()
+        if (currentInputStarted) publishInputMode()
         panel = ""; renderPanel(); refreshStrip()
     }
 
+    private fun advanceInputMode(withinTwelveKey: Boolean = false) {
+        if (directField || engine == null || !currentInputStarted) return
+        changeInputMode(if (withinTwelveKey) inputMode.nextTwelveKey() else inputMode.next())
+    }
+
     private fun toggleLanguage() {
-        if (twelveKeyPreview) { advancePreviewMode(); return }
-        if (directField || engine == null) return
+        if (inputMode != InputMode.QWERTY || directField || engine == null) return
         val ic = currentInputConnection ?: return
         voice.cancel()
         if (japanese) commitComposition(ic)
@@ -1210,7 +1213,7 @@ class TitanImeService : InputMethodService() {
         // Ask Mozc to resolve pending romaji (notably final n) before kana commitment.
         // An already converted candidate must retain the user's selected spelling.
         if (!output.preedit.hasHighlightedPosition() &&
-            !(twelveKeyPreview && previewMode == PreviewInputMode.ENGLISH)) {
+            !(inputMode == InputMode.ENGLISH)) {
             engine?.key(MozcKey.newBuilder().setSpecialKey(MozcKey.SpecialKey.F6).build())
         }
         engine?.command(SessionCommand.CommandType.SUBMIT)?.let { applyOutput(ic, it) }
@@ -1231,28 +1234,28 @@ class TitanImeService : InputMethodService() {
     }
 
     /**
-     * Keep this path independent of normal QWERTY routing. Only preview maps
+     * Keep this path independent of normal QWERTY routing. Twelve-key modes map
      * physical letters to Mozc's existing twelve-key digit and symbol table.
      */
-    private fun handleTwelveKeyPreview(ic: InputConnection, keyCode: Int, event: KeyEvent, fnHeld: Boolean): Boolean {
-        if (!twelveKeyPreview || previewMode == PreviewInputMode.QWERTY || directField || engine == null ||
+    private fun handleTwelveKey(ic: InputConnection, keyCode: Int, event: KeyEvent, fnHeld: Boolean): Boolean {
+        if (inputMode == InputMode.QWERTY || directField || engine == null ||
             event.isCtrlPressed || event.isAltPressed || event.isMetaPressed ||
             event.isShiftPressed || event.isSymPressed || fnHeld) return false
 
-        val numeric = previewMode == PreviewInputMode.NUMBER_HALF || previewMode == PreviewInputMode.NUMBER_FULL
-        if (numeric && keyCode == KeyEvent.KEYCODE_DEL && previewNumericCycle.key != null) {
+        val numeric = inputMode == InputMode.NUMBER_HALF || inputMode == InputMode.NUMBER_FULL
+        if (numeric && keyCode == KeyEvent.KEYCODE_DEL && numericCycle.key != null) {
             ic.setComposingText("", 1)
             ic.finishComposingText()
-            previewNumericCycle.reset()
+            numericCycle.reset()
             return true
         }
         val action = TwelveKeyKeymap.translate(keyCode, preferences.twelveKeySwapCursorAxes)
         if (action == null) {
-            if (numeric) finishPreviewNumeric(ic)
+            if (numeric) finishNumeric(ic)
             return false
         }
         if (action == TwelveKeyKeymap.Action.NextMode) {
-            if (event.repeatCount == 0) advancePreviewMode(withinTwelveKey = true)
+            if (event.repeatCount == 0) advanceInputMode(withinTwelveKey = true)
             return true
         }
         // Physical long-press repeats are not deliberate keypad taps.
@@ -1263,21 +1266,21 @@ class TitanImeService : InputMethodService() {
                 TwelveKeyKeymap.Action.NextMode -> return true // handled above
                 is TwelveKeyKeymap.Action.Character -> {
                     val key = action.value
-                    if (previewMode == PreviewInputMode.NUMBER_HALF) {
-                        finishPreviewNumeric(ic)
+                    if (inputMode == InputMode.NUMBER_HALF) {
+                        finishNumeric(ic)
                         ic.commitText(key.toString(), 1)
                     } else {
-                        val active = previewNumericCycle.key == key &&
-                            previewNumericCycle.current?.let {
+                        val active = numericCycle.key == key &&
+                            numericCycle.current?.let {
                                 ic.getTextBeforeCursor(it.length, 0)?.toString() == it
                             } == true
-                        if (!active) finishPreviewNumeric(ic)
-                        val value = previewNumericCycle.advance(key)
+                        if (!active) finishNumeric(ic)
+                        val value = numericCycle.advance(key)
                         ic.setComposingText(value, 1)
                     }
                 }
                 is TwelveKeyKeymap.Action.Navigate -> {
-                    finishPreviewNumeric(ic)
+                    finishNumeric(ic)
                     EditingBindings.send(ic, action.keyCode, event)
                 }
             }
@@ -1329,17 +1332,21 @@ class TitanImeService : InputMethodService() {
         synchronizeEditor(ic)
         val fnHeld = event.isFunctionPressed || event.deviceId in titanFnDevices
         // Leave Android's IME switching chord to the OS, even if an older
-        // Preview preference bound it to an application shortcut.
-        if (twelveKeyPreview && SystemImeShortcut.matches(event, fnHeld)) {
+        // preference bound it to an application shortcut.
+        if (SystemImeShortcut.matches(event, fnHeld)) {
             if (!directField) {
-                if (previewMode == PreviewInputMode.NUMBER_FULL) finishPreviewNumeric(ic)
+                if (inputMode == InputMode.NUMBER_FULL) finishNumeric(ic)
                 else finishForAppKey(ic)
             }
             return super.onKeyDown(keyCode, event)
         }
+        if (inputMode == InputMode.QWERTY && !directField && shortcutProfile.qwertyLanguage?.matches(event, fnHeld) == true) {
+            if (event.repeatCount == 0) toggleLanguage()
+            return true
+        }
         if (!directField && shortcutProfile.language?.matches(event, fnHeld) == true) {
             if (event.repeatCount == 0 && engine != null && !directField) {
-                toggleLanguage()
+                advanceInputMode()
             }
             return true
         }
@@ -1355,9 +1362,9 @@ class TitanImeService : InputMethodService() {
             if (event.repeatCount == 0) { if (panel == "transform") { panel = ""; renderPanel() } else openTransforms() }
             return true
         }
-        if (keyCode == KeyEvent.KEYCODE_P && handleTwelveKeyPreview(ic, keyCode, event, fnHeld)) return true
+        if (keyCode == KeyEvent.KEYCODE_P && handleTwelveKey(ic, keyCode, event, fnHeld)) return true
         if (handlePanel(event, fnHeld)) return true
-        if (handleTwelveKeyPreview(ic, keyCode, event, fnHeld)) return true
+        if (handleTwelveKey(ic, keyCode, event, fnHeld)) return true
         if (!directField && panel.isEmpty() && fnHeld && preferences.wordDelete && keyCode == KeyEvent.KEYCODE_DEL &&
             !event.isAltPressed && !event.isMetaPressed && !output.preedit.hasHighlightedPosition()) {
             finishForAppKey(ic)

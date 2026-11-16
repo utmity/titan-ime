@@ -7,12 +7,7 @@ internal enum class SettingsPage(val title: String) {
     TWELVE_KEY_GUIDE("12キーの操作ガイド");
 
     companion object {
-        fun homePages(preview: Boolean): List<SettingsPage> = if (preview)
-            listOf(QWERTY, TWELVE_KEY, COMMON, GUIDE) else listOf(QWERTY, COMMON, GUIDE)
-
-        fun resolve(name: String?, preview: Boolean): SettingsPage {
-            val page = entries.firstOrNull { it.name == name } ?: HOME
-            return if (!preview && page in listOf(TWELVE_KEY, TWELVE_KEY_GUIDE)) HOME else page
-        }
+        fun homePages(): List<SettingsPage> = listOf(QWERTY, TWELVE_KEY, COMMON, GUIDE)
+        fun resolve(name: String?): SettingsPage = entries.firstOrNull { it.name == name } ?: HOME
     }
 }

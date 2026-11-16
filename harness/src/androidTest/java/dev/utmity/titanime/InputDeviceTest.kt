@@ -80,20 +80,40 @@ class InputDeviceTest {
             }
             fun toggle() {
                 vendorFn(KeyEvent.ACTION_DOWN)
-                try { key(KeyEvent.KEYCODE_SPACE) } finally { vendorFn(KeyEvent.ACTION_UP) }
+                try { key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_SHIFT_ON) } finally { vendorFn(KeyEvent.ACTION_UP) }
             }
             fun chooseSetting(label: String) {
                 context.startActivity(Intent().setClassName("dev.utmity.titanime", "dev.utmity.titanime.SettingsActivity")
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
                 val deadline = android.os.SystemClock.uptimeMillis() + 10000
+                val shortcutMeta = when (label) {
+                    "Sym+Space" -> KeyEvent.META_SYM_ON
+                    "Alt+Space" -> KeyEvent.META_ALT_ON
+                    "Fn+Shift+Space（標準）" -> KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON
+                    else -> null
+                }
                 var selected = false
                 while (!selected && android.os.SystemClock.uptimeMillis() < deadline) {
                     val root = instrumentation.uiAutomation.rootInActiveWindow
-                    val section = if (label.contains("学習") || label.contains("予測") || label.contains("訂正")) "共通設定" else "QWERTY入力設定"
+                    val section = if (label.contains("学習") || label.contains("予測") || label.contains("訂正") || label.contains("前/次")) "共通設定" else "QWERTY入力設定"
                     root?.findAccessibilityNodeInfosByText(section)?.firstOrNull { it.text?.toString() == section && it.isClickable }
                         ?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
-                    val node = instrumentation.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(label)?.firstOrNull { it.text?.toString() == label }
-                    if (node != null) selected = node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                    if (shortcutMeta != null) {
+                        val control = instrumentation.uiAutomation.rootInActiveWindow
+                            ?.findAccessibilityNodeInfosByText("QWERTYの日本語・英語切替")
+                            ?.firstOrNull { it.isClickable }
+                        if (control != null && control.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) {
+                            Thread.sleep(200)
+                            instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_SPACE, 0, shortcutMeta))
+                            instrumentation.sendKeySync(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_SPACE, 0, shortcutMeta))
+                            instrumentation.waitForIdleSync()
+                            selected = true
+                        }
+                    } else {
+                        val node = instrumentation.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(label)
+                            ?.firstOrNull { it.text?.toString() == label }
+                        if (node != null) selected = node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                    }
                     if (!selected) Thread.sleep(100)
                 }
                 org.junit.Assert.assertTrue("Settings control available: $label", selected)
@@ -612,7 +632,7 @@ class InputDeviceTest {
             key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_ALT_ON)
             type("ka"); expect("か", true)
             key(KeyEvent.KEYCODE_SPACE, KeyEvent.META_ALT_ON); expect("か", false)
-            chooseSetting("Fn+Space（標準）")
+            chooseSetting("Fn+Shift+Space（標準）")
             chooseSetting("Fn+J/K：前/次・Fn+U/O：縮小/拡大")
             clearEditor(); toggle()
             type("nihongowobenkyousuru"); key(KeyEvent.KEYCODE_SPACE)

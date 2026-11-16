@@ -19,7 +19,7 @@ class SettingsActivity : Activity() {
         super.onCreate(state)
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
         preferences = ImePreferences(this)
-        page = SettingsPage.resolve(state?.getString("page") ?: intent.getStringExtra("page"), preview)
+        page = SettingsPage.resolve(state?.getString("page") ?: intent.getStringExtra("page"))
         title = page.title
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -96,9 +96,9 @@ class SettingsActivity : Activity() {
                         val binding = ShortcutBinding.capture(event, titanFnHeld || event.isFunctionPressed)
                         val reason = when {
                             binding == null -> "Ctrl・Alt・Fn・Sym・Metaなどと組み合わせてください。"
-                            binding.reserved() || (preview && SystemImeShortcut.reserved(binding)) -> "この組み合わせはAndroidのIME切替・文節操作・カーソル編集用に予約されています。"
+                            binding.reserved() || SystemImeShortcut.reserved(binding) -> "この組み合わせはAndroidのIME切替・文節操作・カーソル編集用に予約されています。"
                             else -> preferences.shortcuts().ownerOf(binding, action)?.let {
-                                "「${when (it) { "language" -> "日英切替"; "history" -> "履歴"; else -> "文字変換" }}」で使用中です。"
+                                "「${when (it) { "language" -> "入力方式切替"; "qwerty_language" -> "QWERTY日英切替"; "history" -> "履歴"; else -> "文字変換" }}」で使用中です。"
                             }
                         }
                         if (reason != null) hint.text = reason
@@ -121,14 +121,14 @@ class SettingsActivity : Activity() {
                 button("入力方法を切り替える") {
                     getSystemService(android.view.inputmethod.InputMethodManager::class.java).showInputMethodPicker()
                 }
-                for (destination in SettingsPage.homePages(preview)) button(destination.title) { navigate(destination) }
+                for (destination in SettingsPage.homePages()) button(destination.title) { navigate(destination) }
             }
             SettingsPage.QWERTY -> {
-                if (preview) choices("japanese", "QWERTYの日本語・英語", listOf(
+                choices("japanese", "QWERTYの日本語・英語", listOf(
                     "ja" to "日本語（ローマ字かな入力）", "en" to "英語（直接入力）"
                 ), if (preferences.japanese) "ja" else "en") { preferences.japanese = it == "ja" }
-                text(if (preview) "QWERTYでは従来の日英設定で入力します。共通設定の日英・入力方式切替ショートカットと画面のモードボタンはQWERTYを含む入力方式の切替、12キー内の切替はPです。" else
-                    "共通設定の日英切替ショートカットまたは入力バーのあ/Aで、日本語・英語を切り替えます。")
+                shortcutButton("qwerty_language", "QWERTYの日本語・英語切替")
+                text("QWERTYの日英切替は上のショートカット（標準Fn+Shift+Space）、または画面モードボタンの長押し。共通設定の入力方式切替（標準Fn+Space）と画面ボタンのタップはQWERTYを含む方式切替です。Pは通常の文字です。")
                 choices("alt_text", "T2E内蔵キーボードのAlt", listOf("text" to "Altで数字・記号（標準）", "meta" to "Altをアプリへ渡す（Meta）"), if (preferences.altText) "text" else "meta") { preferences.altText = it == "text" }
                 choices("editing", "通常編集のカーソル操作", listOf("on" to "有効：Fnと方向キー配置を併用", "off" to "無効（アプリへ渡す）"), if (preferences.editing) "on" else "off") { preferences.editing = it == "on" }
                 choices("editing_layout", "通常編集の方向キー配置", listOf("hjkl" to "H/L/K/J：左/右/上/下", "wasd" to "A/D/W/S：左/右/上/下"), preferences.editingLayout) { preferences.editingLayout = it }
@@ -143,7 +143,10 @@ class SettingsActivity : Activity() {
                 ), if (preferences.twelveKeySwapCursorAxes) "swapped" else "default") { preferences.twelveKeySwapCursorAxes = it == "swapped" }
             }
             SettingsPage.COMMON -> {
-                shortcutButton("language", if (preview) "入力方式の切替（QWERTYを含む）" else "日英切替")
+                choices("input_mode", "入力方式（次回起動時にも復元）", InputMode.entries.map { it.name to it.description }, preferences.inputMode.name) {
+                    preferences.inputMode = InputMode.restore(it)
+                }
+                shortcutButton("language", "入力方式の切替（QWERTYを含む）")
                 choices("toolbar_mode", "候補バーの表示", listOf("always" to "通常時も表示", "compose" to "入力・変換中のみ表示", "conversion" to "変換中のみ表示"), preferences.toolbarMode) { preferences.toolbarMode = it }
                 text("バーを隠している間も物理キーで入力できます。変換中やメニュー表示中は必要に応じてバーが現れます。")
                 choices("prediction", "入力中の予測候補", listOf("on" to "予測変換オン", "off" to "予測変換オフ"), if (preferences.prediction) "on" else "off") { preferences.prediction = it == "on" }
@@ -172,7 +175,7 @@ class SettingsActivity : Activity() {
             }
             SettingsPage.GUIDE -> {
                 button(SettingsPage.QWERTY_GUIDE.title) { navigate(SettingsPage.QWERTY_GUIDE) }
-                if (preview) button(SettingsPage.TWELVE_KEY_GUIDE.title) { navigate(SettingsPage.TWELVE_KEY_GUIDE) }
+                button(SettingsPage.TWELVE_KEY_GUIDE.title) { navigate(SettingsPage.TWELVE_KEY_GUIDE) }
             }
             SettingsPage.QWERTY_GUIDE -> text(qwertyGuide())
             SettingsPage.TWELVE_KEY_GUIDE -> text(twelveKeyGuide())
@@ -221,7 +224,9 @@ class SettingsActivity : Activity() {
 
     private fun qwertyGuide() = """
         【QWERTY入力】
-        ${if (preview) "入力方式の切替ショートカット（${preferences.shortcut("language")?.label() ?: "未設定"}）または画面のQ/あ/abc/123/１２３でQWERTYを選びます。QWERTYでは保存済みの日英設定を使用します。" else "${preferences.shortcut("language")?.label() ?: "未設定"}または入力バーのあ/A：日本語・英語切替。"}
+        ${preferences.shortcut("language")?.label() ?: "未設定"}または画面ボタンのタップ：QWERTYを含む入力方式の切替。
+        ${preferences.shortcut("qwerty_language")?.label() ?: "未設定"}またはQWERTY画面ボタンの長押し：日本語・英語切替。
+        現在の入力方式とQWERTYの日英設定を保存します。共通設定・QWERTY入力設定からも変更できます。
         日本語入力中はSpaceで変換・候補送り、Enterで確定。Backspaceで削除。
         - , .：ー 、 。を入力。元のローマ字候補をタップすると英字で確定します。
         文節移動：${if (preferences.segments == "jk") "Fn+J/K" else "Fn+H/L"}。文節長変更：Fn+U/O。
