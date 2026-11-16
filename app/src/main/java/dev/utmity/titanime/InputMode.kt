@@ -10,6 +10,10 @@ internal enum class InputMode(val badge: String, val description: String) {
 
     companion object {
         fun restore(saved: String?): InputMode = entries.firstOrNull { it.name == saved } ?: QWERTY
+
+        fun restoreTwelveKey(saved: String?, legacyMode: InputMode = KANA): InputMode =
+            restore(saved).takeUnless { it == QWERTY }
+                ?: legacyMode.takeUnless { it == QWERTY } ?: KANA
     }
 
     val usesTwelveKeyTable: Boolean get() = this == KANA || this == ENGLISH
@@ -19,12 +23,15 @@ internal enum class InputMode(val badge: String, val description: String) {
         NUMBER_HALF, NUMBER_FULL -> false
     }
 
-    fun next(): InputMode = entries[(ordinal + 1) % entries.size]
+    fun toggleFamily(lastTwelveKey: InputMode): InputMode =
+        if (this == QWERTY) lastTwelveKey.takeUnless { it == QWERTY } ?: KANA else QWERTY
 
     fun nextTwelveKey(): InputMode = when (this) {
         QWERTY -> QWERTY // P never enters or leaves QWERTY.
+        KANA -> ENGLISH
+        ENGLISH -> NUMBER_HALF
+        NUMBER_HALF -> NUMBER_FULL
         NUMBER_FULL -> KANA
-        else -> next()
     }
 
     fun status(japanese: Boolean): String = if (this == QWERTY)
