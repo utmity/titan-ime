@@ -380,9 +380,9 @@ class EditorCompatibilityTest {
     @Test fun toolbarModeMicrophoneAndUndoPair() {
         type("ka"); key(KeyEvent.KEYCODE_ENTER)
         assertNotNull(imeNode("音声入力"))
-        tapIme("QWERTY・日本語・次の入力方式へ切替・長押しで日英切替", longPress = true)
-        assertNotNull(imeNode("QWERTY・英語・次の入力方式へ切替・長押しで日英切替")); assertNotNull(imeNode("音声入力"))
-        tapIme("QWERTY・英語・次の入力方式へ切替・長押しで日英切替", longPress = true)
+        tapIme("QWERTY・日本語・QWERTYとガラケー入力を切替・長押しで日英切替", longPress = true)
+        assertNotNull(imeNode("QWERTY・英語・QWERTYとガラケー入力を切替・長押しで日英切替")); assertNotNull(imeNode("音声入力"))
+        tapIme("QWERTY・英語・QWERTYとガラケー入力を切替・長押しで日英切替", longPress = true)
         tapIme("入力メニュー")
         fun hasVoiceMenuItem(node: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
             if (node == null) return false

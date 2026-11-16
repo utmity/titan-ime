@@ -33,6 +33,7 @@ internal class ImePreferences(context: Context) {
     private var cachedToggle = "fn"
     private var cachedSegments = "hl"
     private var cachedInputMode = InputMode.QWERTY
+    private var cachedLastTwelveKeyMode = InputMode.KANA
     private var cachedJapanese = false
     private var cachedToolbarMode = "always"
     private var cachedShortcutQwertyLanguage: String? = null
@@ -76,6 +77,7 @@ internal class ImePreferences(context: Context) {
         cachedToggle = store.getString("toggle", "fn") ?: "fn"
         cachedSegments = store.getString("segments", "hl") ?: "hl"
         cachedInputMode = InputMode.restore(store.getString("input_mode", null))
+        cachedLastTwelveKeyMode = InputMode.restoreTwelveKey(store.getString("last_twelve_key_mode", null), cachedInputMode)
         cachedShortcutQwertyLanguage = store.getString("shortcut_qwerty_language", null)
         cachedJapanese = store.getBoolean("japanese", false)
         cachedToolbarMode = store.getString("toolbar_mode", "always") ?: "always"
@@ -110,7 +112,12 @@ internal class ImePreferences(context: Context) {
                 cachedSegments = store.getString(key, "hl") ?: "hl"
                 cachedSegmentBindings = null
             }
-            "input_mode" -> cachedInputMode = InputMode.restore(store.getString(key, null))
+            "input_mode" -> {
+                cachedInputMode = InputMode.restore(store.getString(key, null))
+                if (!store.contains("last_twelve_key_mode"))
+                    cachedLastTwelveKeyMode = InputMode.restoreTwelveKey(null, cachedInputMode)
+            }
+            "last_twelve_key_mode" -> cachedLastTwelveKeyMode = InputMode.restoreTwelveKey(store.getString(key, null), cachedInputMode)
             "shortcut_qwerty_language" -> cachedShortcutQwertyLanguage = store.getString(key, null)
             "japanese" -> cachedJapanese = store.getBoolean(key, false)
             "toolbar_mode" -> cachedToolbarMode = store.getString(key, "always") ?: "always"
@@ -164,9 +171,15 @@ internal class ImePreferences(context: Context) {
         set(value) {
             ensureLoaded()
             if (cachedInputMode == value) return
+            if (value != InputMode.QWERTY) cachedLastTwelveKeyMode = value
             cachedInputMode = value
-            store.edit().putString("input_mode", value.name).apply()
+            // Persist together so returning to QWERTY never loses the last
+            // twelve-key submode, even across a service/process restart.
+            store.edit().putString("input_mode", value.name)
+                .putString("last_twelve_key_mode", cachedLastTwelveKeyMode.name).apply()
         }
+    val lastTwelveKeyMode: InputMode
+        get() { ensureLoaded(); return cachedLastTwelveKeyMode }
     var japanese: Boolean
         get() { ensureLoaded(); return cachedJapanese }
         set(value) { cachedJapanese = value; store.edit().putBoolean("japanese", value).apply() }

@@ -557,7 +557,7 @@ class TitanImeService : InputMethodService() {
         menuButton?.visibility = if (!directField || inlineVisible) View.VISIBLE else View.GONE
         modeButton?.apply {
             text = if (inputMode == InputMode.QWERTY) { if (japanese) "Qあ" else "QA" } else inputMode.badge
-            contentDescription = "${inputMode.status(japanese)}・次の入力方式へ切替" +
+            contentDescription = "${inputMode.status(japanese)}・QWERTYとガラケー入力を切替" +
                 if (inputMode == InputMode.QWERTY) "・長押しで日英切替" else ""
             visibility = if (directField) View.GONE else View.VISIBLE
         }
@@ -867,7 +867,7 @@ class TitanImeService : InputMethodService() {
 
     private fun advanceInputMode(withinTwelveKey: Boolean = false) {
         if (directField || engine == null || !currentInputStarted) return
-        changeInputMode(if (withinTwelveKey) inputMode.nextTwelveKey() else inputMode.next())
+        changeInputMode(if (withinTwelveKey) inputMode.nextTwelveKey() else inputMode.toggleFamily(preferences.lastTwelveKeyMode))
     }
 
     private fun toggleLanguage() {

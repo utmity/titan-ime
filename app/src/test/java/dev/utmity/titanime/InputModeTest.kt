@@ -41,17 +41,22 @@ class InputModeTest {
         assertEquals("QWERTY・英語", InputMode.QWERTY.status(false))
     }
 
-    @Test fun modesCycleIncludingQwerty() {
-        var mode = InputMode.QWERTY
-        val expected = listOf(
-            InputMode.KANA, InputMode.ENGLISH,
-            InputMode.NUMBER_HALF, InputMode.NUMBER_FULL,
-            InputMode.QWERTY
-        )
-        expected.forEach { next ->
-            mode = mode.next()
-            assertEquals(next, mode)
+    @Test fun familyToggleRestoresEachSubmodeInsteadOfCyclingThroughThem() {
+        assertEquals(InputMode.KANA, InputMode.QWERTY.toggleFamily(InputMode.QWERTY))
+        for (mode in InputMode.entries.filter { it != InputMode.QWERTY }) {
+            assertEquals(InputMode.QWERTY, mode.toggleFamily(mode))
+            assertEquals(mode, InputMode.QWERTY.toggleFamily(mode))
         }
+    }
+
+    @Test fun rememberedModeDefaultsToKanaAndMigratesActiveLegacySubmode() {
+        for (saved in listOf(null, "invalid", "QWERTY")) {
+            assertEquals(InputMode.KANA, InputMode.restoreTwelveKey(saved))
+            assertEquals(InputMode.KANA, InputMode.restoreTwelveKey(saved, InputMode.QWERTY))
+            assertEquals(InputMode.ENGLISH, InputMode.restoreTwelveKey(saved, InputMode.ENGLISH))
+        }
+        for (mode in InputMode.entries.filter { it != InputMode.QWERTY })
+            assertEquals(mode, InputMode.restoreTwelveKey(mode.name))
     }
 
     @Test fun fullwidthNumericKeysStartWithFullwidthDigits() {

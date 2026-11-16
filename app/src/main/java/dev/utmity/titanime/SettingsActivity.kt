@@ -128,7 +128,7 @@ class SettingsActivity : Activity() {
                     "ja" to "日本語（ローマ字かな入力）", "en" to "英語（直接入力）"
                 ), if (preferences.japanese) "ja" else "en") { preferences.japanese = it == "ja" }
                 shortcutButton("qwerty_language", "QWERTYの日本語・英語切替")
-                text("QWERTYの日英切替は上のショートカット（標準Fn+Shift+Space）、または画面モードボタンの長押し。共通設定の入力方式切替（標準Fn+Space）と画面ボタンのタップはQWERTYを含む方式切替です。Pは通常の文字です。")
+                text("QWERTYの日英切替は上のショートカット（標準Fn+Shift+Space）、または画面モードボタンの長押し。共通設定の入力方式切替（標準Fn+Space）と画面ボタンのタップはQWERTYとガラケー入力の2方式切替です。ガラケー内の前回モードに戻ります。Pは通常の文字です。")
                 choices("alt_text", "T2E内蔵キーボードのAlt", listOf("text" to "Altで数字・記号（標準）", "meta" to "Altをアプリへ渡す（Meta）"), if (preferences.altText) "text" else "meta") { preferences.altText = it == "text" }
                 choices("editing", "通常編集のカーソル操作", listOf("on" to "有効：Fnと方向キー配置を併用", "off" to "無効（アプリへ渡す）"), if (preferences.editing) "on" else "off") { preferences.editing = it == "on" }
                 choices("editing_layout", "通常編集の方向キー配置", listOf("hjkl" to "H/L/K/J：左/右/上/下", "wasd" to "A/D/W/S：左/右/上/下"), preferences.editingLayout) { preferences.editingLayout = it }
@@ -146,7 +146,7 @@ class SettingsActivity : Activity() {
                 choices("input_mode", "入力方式（次回起動時にも復元）", InputMode.entries.map { it.name to it.description }, preferences.inputMode.name) {
                     preferences.inputMode = InputMode.restore(it)
                 }
-                shortcutButton("language", "入力方式の切替（QWERTYを含む）")
+                shortcutButton("language", "入力方式の切替（QWERTY⇔ガラケー）")
                 choices("toolbar_mode", "候補バーの表示", listOf("always" to "通常時も表示", "compose" to "入力・変換中のみ表示", "conversion" to "変換中のみ表示"), preferences.toolbarMode) { preferences.toolbarMode = it }
                 text("バーを隠している間も物理キーで入力できます。変換中やメニュー表示中は必要に応じてバーが現れます。")
                 choices("prediction", "入力中の予測候補", listOf("on" to "予測変換オン", "off" to "予測変換オフ"), if (preferences.prediction) "on" else "off") { preferences.prediction = it == "on" }
@@ -224,7 +224,7 @@ class SettingsActivity : Activity() {
 
     private fun qwertyGuide() = """
         【QWERTY入力】
-        ${preferences.shortcut("language")?.label() ?: "未設定"}または画面ボタンのタップ：QWERTYを含む入力方式の切替。
+        ${preferences.shortcut("language")?.label() ?: "未設定"}または画面ボタンのタップ：QWERTYとガラケー入力の2方式切替。ガラケー内の前回モードに戻ります（初期値はかな）。
         ${preferences.shortcut("qwerty_language")?.label() ?: "未設定"}またはQWERTY画面ボタンの長押し：日本語・英語切替。
         現在の入力方式とQWERTYの日英設定を保存します。共通設定・QWERTY入力設定からも変更できます。
         日本語入力中はSpaceで変換・候補送り、Enterで確定。Backspaceで削除。
@@ -246,7 +246,7 @@ class SettingsActivity : Activity() {
         【ガラケー入力（12キー）】
         P：かな → 英字 → 半角数字 → 全角数字・記号 → かな。QWERTYには移行しません。
         Pの長押しリピートでは連続切替しません。未確定文字は確定してから切り替えます。
-        ${preferences.shortcut("language")?.label() ?: "未設定"}または画面のモードボタン：QWERTYを含む入力方式の切替。
+        ${preferences.shortcut("language")?.label() ?: "未設定"}または画面のモードボタン：QWERTYとガラケー入力の2方式切替。ガラケー内の前回モードに戻ります（初期値はかな）。
         Ctrl+Space：AndroidのIME切替（OS・端末の設定に依存）。
 
         【左右の文字キー：常時両方有効】

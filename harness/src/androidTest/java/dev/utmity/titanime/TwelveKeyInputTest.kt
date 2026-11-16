@@ -70,12 +70,18 @@ class TwelveKeyInputTest {
     }
 
     private fun setMode(target: String) {
-        repeat(5) {
-            if (inputMode == target) return
+        if (inputMode == target) return
+        if (inputMode == "QWERTY" || target == "QWERTY") {
             key(KeyEvent.KEYCODE_SPACE, meta = KeyEvent.META_FUNCTION_ON)
             reconnect()
         }
-        assertEquals("Default Fn+Space mode shortcut required", target, inputMode)
+        if (inputMode == target) return
+        repeat(4) {
+            key(KeyEvent.KEYCODE_P)
+            reconnect()
+            if (inputMode == target) return
+        }
+        assertEquals("Default Fn+Space family shortcut and P cycle required", target, inputMode)
     }
 
     @After fun close() {
@@ -332,7 +338,10 @@ class TwelveKeyInputTest {
         org.junit.Assume.assumeTrue("Use -e restartIme true for the process restart test",
             InstrumentationRegistry.getArguments().getString("restartIme") == "true")
         setMode("NUMBER_FULL")
-        key(KeyEvent.KEYCODE_E); key(KeyEvent.KEYCODE_ENTER)
+        key(KeyEvent.KEYCODE_E)
+        key(KeyEvent.KEYCODE_SPACE, meta = KeyEvent.META_FUNCTION_ON)
+        reconnect()
+        assertEquals("QWERTY", inputMode)
         try {
             shell("am force-stop $imePackage")
             context.startActivity(Intent().setClassName(imePackage, "dev.utmity.titanime.SettingsActivity")
@@ -342,6 +351,9 @@ class TwelveKeyInputTest {
         } finally {
             shell("ime set $component"); waitForIme(component)
         }
+        reconnect()
+        assertEquals("QWERTY", inputMode)
+        key(KeyEvent.KEYCODE_SPACE, meta = KeyEvent.META_FUNCTION_ON)
         reconnect()
         assertEquals("NUMBER_FULL", inputMode)
         instrumentation.runOnMainSync { assertEquals("２", activity.editor.text.toString()) }
@@ -364,6 +376,69 @@ class TwelveKeyInputTest {
                 key(KeyEvent.KEYCODE_SPACE, meta = KeyEvent.META_FUNCTION_ON or KeyEvent.META_SHIFT_ON)
                 reconnect()
             }
+        }
+    }
+
+    @Test fun familyShortcutRestoresEachSubmodeAndIgnoresRepeat() {
+        for (mode in listOf("KANA", "ENGLISH", "NUMBER_HALF", "NUMBER_FULL")) {
+            setMode(mode)
+            key(KeyEvent.KEYCODE_SPACE, meta = KeyEvent.META_FUNCTION_ON)
+            reconnect()
+            assertEquals("QWERTY", inputMode)
+            key(KeyEvent.KEYCODE_SPACE, repeat = 1, meta = KeyEvent.META_FUNCTION_ON)
+            reconnect()
+            assertEquals("QWERTY", inputMode)
+            key(KeyEvent.KEYCODE_SPACE, meta = KeyEvent.META_FUNCTION_ON)
+            reconnect()
+            assertEquals(mode, inputMode)
+        }
+    }
+
+    @Test fun toolbarShortPressMatchesFamilyShortcutForEveryRememberedMode() {
+        val automation = instrumentation.uiAutomation
+        val flags = automation.serviceInfo.flags
+        automation.serviceInfo = automation.serviceInfo.apply {
+            this.flags = this.flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        }
+        fun find(node: android.view.accessibility.AccessibilityNodeInfo?): android.view.accessibility.AccessibilityNodeInfo? {
+            if (node == null) return null
+            if (node.isVisibleToUser && node.contentDescription?.toString()?.contains("・QWERTYとガラケー入力を切替") == true) return node
+            for (i in 0 until node.childCount) find(node.getChild(i))?.let { return it }
+            return null
+        }
+        fun tap() {
+            val deadline = android.os.SystemClock.uptimeMillis() + 5000
+            var modeButton: android.view.accessibility.AccessibilityNodeInfo? = null
+            while (modeButton == null && android.os.SystemClock.uptimeMillis() < deadline) {
+                modeButton = automation.windows.filter { it.root?.packageName?.toString() == imePackage }
+                    .firstNotNullOfOrNull { find(it.root) }
+                if (modeButton == null) Thread.sleep(50)
+            }
+            assertNotNull("Mode toolbar must be visible (use always-visible toolbar setting)", modeButton)
+            assertTrue(modeButton!!.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
+            instrumentation.waitForIdleSync()
+            reconnect()
+        }
+        try {
+            for (mode in listOf("KANA", "ENGLISH", "NUMBER_HALF", "NUMBER_FULL")) {
+                setMode(mode)
+                tap(); assertEquals("QWERTY", inputMode)
+                tap(); assertEquals(mode, inputMode)
+            }
+        } finally { automation.serviceInfo = automation.serviceInfo.apply { this.flags = flags } }
+    }
+
+    @Test fun familyToggleCommitsReadingBeforeLeavingAndStartsFreshWhenReturning() {
+        key(KeyEvent.KEYCODE_E); expect("か")
+        key(KeyEvent.KEYCODE_SPACE, meta = KeyEvent.META_FUNCTION_ON)
+        expect("か", composing = false)
+        reconnect(); assertEquals("QWERTY", inputMode)
+        key(KeyEvent.KEYCODE_SPACE, meta = KeyEvent.META_FUNCTION_ON)
+        reconnect(); assertEquals("KANA", inputMode)
+        key(KeyEvent.KEYCODE_E)
+        instrumentation.runOnMainSync {
+            assertEquals("かか", activity.editor.text.toString())
+            assertEquals(1, BaseInputConnection.getComposingSpanStart(activity.editor.text))
         }
     }
 

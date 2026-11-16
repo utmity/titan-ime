@@ -1,7 +1,7 @@
 # Titan IME
 
 通常版・Preview共通の12キー対応を準備しています。既存環境の初期方式はQWERTYのままです。
-Fn+Spaceは入力方式、QWERTYの日英切替は標準Fn+Shift+Space／モードボタン長押し。
+Fn+Space／画面ボタン短押しはQWERTY⇔ガラケーの2方式切替（ガラケー内モードを記憶）、QWERTYの日英切替は標準Fn+Shift+Space／モードボタン長押し。
 方式の保存・復元、キー配列、APKと署名の注意は[通常版12キー入力](docs/twelve-key-production.md)を参照してください。
 
 ## 2026-11-05: 入力とカスタマイズ
