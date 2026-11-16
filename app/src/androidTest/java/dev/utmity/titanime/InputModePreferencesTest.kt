@@ -70,6 +70,11 @@ class InputModePreferencesTest {
                 assertEquals(InputMode.ENGLISH, legacy.lastTwelveKeyMode)
                 legacy.inputMode = InputMode.QWERTY
                 assertEquals(InputMode.ENGLISH, ImePreferences(instrumentation.targetContext).lastTwelveKeyMode)
+                check(store.edit().remove("last_twelve_key_mode").putString("input_mode", "ENGLISH").commit())
+                assertEquals(InputMode.ENGLISH, other.lastTwelveKeyMode)
+                check(store.edit().remove("input_mode").commit())
+                assertEquals(InputMode.KANA, other.lastTwelveKeyMode)
+                assertEquals(ImePreferences(instrumentation.targetContext).lastTwelveKeyMode, other.lastTwelveKeyMode)
             } finally {
                 check(store.edit().apply { original.forEach { (key, value) ->
                     if (value == null) remove(key) else putString(key, value)

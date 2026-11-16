@@ -114,8 +114,8 @@ internal class ImePreferences(context: Context) {
             }
             "input_mode" -> {
                 cachedInputMode = InputMode.restore(store.getString(key, null))
-                if (!store.contains("last_twelve_key_mode") && cachedInputMode != InputMode.QWERTY)
-                    cachedLastTwelveKeyMode = cachedInputMode
+                if (!store.contains("last_twelve_key_mode"))
+                    cachedLastTwelveKeyMode = InputMode.restoreTwelveKey(null, cachedInputMode)
             }
             "last_twelve_key_mode" -> cachedLastTwelveKeyMode = InputMode.restoreTwelveKey(store.getString(key, null), cachedInputMode)
             "shortcut_qwerty_language" -> cachedShortcutQwertyLanguage = store.getString(key, null)
