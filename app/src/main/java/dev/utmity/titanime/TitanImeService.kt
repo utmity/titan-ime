@@ -274,6 +274,7 @@ class TitanImeService : InputMethodService() {
         traceLifecycle { "startInputView restarting=$restarting" }
         super.onStartInputView(info, restarting)
         updateCaptionBar()
+        if (panel == "history") renderPanel() // A shortcut can open it before the view is created.
         refreshStrip()
     }
     override fun onFinishInputView(finishingInput: Boolean) {
@@ -305,6 +306,10 @@ class TitanImeService : InputMethodService() {
         imeSwitcherButton?.visibility = if (visible) View.VISIBLE else View.GONE
     }
     override fun onWindowHidden() {
+        if (panel == "history") {
+            panel = "" // Stop holding/refreshing an ephemeral clip when its panel is no longer visible.
+            renderPanel()
+        }
         if (voice.active) voiceStatus = "画面が閉じられたため中止しました"
         voice.cancel()
         imeWindowVisible = false
