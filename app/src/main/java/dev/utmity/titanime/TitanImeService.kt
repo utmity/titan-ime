@@ -98,18 +98,33 @@ class TitanImeService : InputMethodService() {
     private var voiceStatus = ""
     private var inlineVisible = false
     private var transformIndex = 0
+    private var currentClipboard: CurrentClipboard = CurrentClipboard.Empty
+    private var historyRows: List<ClipboardPanel.Row> = emptyList()
     private var panel = ""
+        set(value) {
+            field = value
+            if (value != "history") {
+                currentClipboard = CurrentClipboard.Empty
+                historyRows = emptyList()
+            }
+        }
     private var historyIndex = 0
     private var inlineBatch: InlineBatch<View>? = null
     private var autofillRow: LinearLayout? = null
     private val history by lazy { ClipboardHistory(this) }
     private val clipboard by lazy { getSystemService(android.content.ClipboardManager::class.java) }
     private val clipListener = android.content.ClipboardManager.OnPrimaryClipChangedListener {
-        if (currentInputStarted && !directField && currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0 && history.enabled) {
-            val clip = clipboard.primaryClip
-            val sensitive = clip?.description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
-            if (clip != null && clip.itemCount == 1) clip.getItemAt(0).text?.let { history.capture(it.toString(), sensitive) }
-            if (panel == "history") renderPanel()
+        if (currentInputStarted && !directField) {
+            val captureAllowed = history.enabled && currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
+            if (captureAllowed || panel == "history") {
+                val snapshot = ClipboardTextReader.read(clipboard)
+                if (captureAllowed) (snapshot as? CurrentClipboard.Text)?.let { history.capture(it.value, it.sensitive) }
+                if (panel == "history") {
+                    currentClipboard = snapshot
+                    historyIndex = 0
+                    renderPanel()
+                }
+            }
         }
     }
     private val titanFnDevices = mutableSetOf<Int>()
@@ -259,6 +274,7 @@ class TitanImeService : InputMethodService() {
         traceLifecycle { "startInputView restarting=$restarting" }
         super.onStartInputView(info, restarting)
         updateCaptionBar()
+        if (panel == "history") renderPanel() // A shortcut can open it before the view is created.
         refreshStrip()
     }
     override fun onFinishInputView(finishingInput: Boolean) {
@@ -290,6 +306,10 @@ class TitanImeService : InputMethodService() {
         imeSwitcherButton?.visibility = if (visible) View.VISIBLE else View.GONE
     }
     override fun onWindowHidden() {
+        if (panel == "history") {
+            panel = "" // Stop holding/refreshing an ephemeral clip when its panel is no longer visible.
+            renderPanel()
+        }
         if (voice.active) voiceStatus = "画面が閉じられたため中止しました"
         voice.cancel()
         imeWindowVisible = false
@@ -953,16 +973,28 @@ class TitanImeService : InputMethodService() {
     }
 
     private fun openHistory() {
-        if (directField) return
-        panel = "history"; historyIndex = 0; renderPanel(); requestShowSelf(0)
+        if (directField || !currentInputStarted || currentInputConnection == null) return
+        panel = "history"
+        currentClipboard = ClipboardTextReader.read(clipboard)
+        historyIndex = 0; renderPanel(); requestShowSelf(0)
     }
-    private fun visibleHistory() = history.entries()
     private fun pasteHistory() {
-        if (directField || !history.enabled) return
-        val entry = visibleHistory().getOrNull(historyIndex) ?: return
+        if (directField || !currentInputStarted) return
+        val entry = historyRows.getOrNull(historyIndex) ?: return
+        if (!entry.current && !history.enabled) return
+        if (entry.current) {
+            // Never paste a different/currently masked clip under a stale row.
+            val fresh = ClipboardTextReader.read(clipboard)
+            if (fresh != CurrentClipboard.Text(entry.text, entry.sensitive)) {
+                currentClipboard = fresh; historyIndex = 0; renderPanel()
+                notice("クリップボードが変わりました。内容を確認して選び直してください")
+                return
+            }
+        }
         val ic = currentInputConnection ?: return
         // Pasting is an explicit edit. Finalize the current composition once,
         // rather than replacing it with a stale native session after the paste.
+        finishNumeric(ic)
         commitComposition(ic)
         ic.commitText(entry.text, 1)
         panel = ""; renderPanel()
@@ -1045,27 +1077,44 @@ class TitanImeService : InputMethodService() {
                 item((if (index == transformIndex) "▶ " else "") + label) { transformIndex = index; transformSelection() }
             }
         } else if (panel == "clear") {
-            item("全履歴を削除する（ピン留めも含む）") { history.clear(); panel = "history"; historyIndex = 0; renderPanel() }
+            item("全履歴を削除する（ピン留めも含む）") { history.clear(); openHistory() }
         } else if (panel == "history") {
-            if (!history.enabled) {
-                item("履歴保存はオフです。設定から有効にできます") { }
-            } else {
-                val entries = visibleHistory()
-                historyIndex = historyIndex.coerceIn(0, maxOf(0, entries.lastIndex))
-                entries.drop((historyIndex / 4) * 4).take(4).forEach { entry ->
-                    val index = entries.indexOf(entry)
-                    item((if (index == historyIndex) "▶ " else "") + (if (entry.pinned) "★ " else "") + entry.text.take(100).replace('\n', ' ')) {
-                        historyIndex = index; pasteHistory()
-                    }
+            // Only the explicitly opened panel holds the ephemeral current clip.
+            val saved = if (history.enabled) history.entries().map { ClipboardPanel.Saved(it.text, it.pinned) } else emptyList()
+            historyRows = ClipboardPanel.rows(currentClipboard, saved)
+            when (currentClipboard) {
+                CurrentClipboard.Unavailable -> item("現在のクリップボードを取得できません") { }
+                CurrentClipboard.Unsupported -> item("現在のクリップボードは対応する単一テキストではありません") { }
+                CurrentClipboard.Empty -> item("現在のクリップボードにテキストがありません") { }
+                is CurrentClipboard.Text -> Unit
+            }
+            historyIndex = historyIndex.coerceIn(0, maxOf(0, historyRows.lastIndex))
+            historyRows.drop((historyIndex / 4) * 4).take(4).forEachIndexed { offset, entry ->
+                val index = (historyIndex / 4) * 4 + offset
+                val button = panelButton((if (index == historyIndex) "▶ " else "") + entry.label()) {
+                    historyIndex = index; pasteHistory()
+                }.apply {
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
                 }
+                view.addView(button)
+            }
+            if (!history.enabled) item("履歴保存はオフです。現在のコピーは保存せず貼り付けられます") { }
+            else {
+                val selected = historyRows.getOrNull(historyIndex)
                 val row = LinearLayout(this)
-                row.addView(panelButton("ピン切替") { entries.getOrNull(historyIndex)?.let { history.pin(it.text) }; renderPanel() })
-                row.addView(panelButton("削除") { entries.getOrNull(historyIndex)?.let { history.delete(it.text) }; renderPanel() })
+                row.addView(panelButton("ピン切替") {
+                    selected?.takeIf { it.stored && !it.sensitive }?.let { history.pin(it.text) }; renderPanel()
+                }.apply { isEnabled = selected?.let { it.stored && !it.sensitive } == true })
+                row.addView(panelButton("保存分を削除") {
+                    selected?.takeIf { it.stored }?.let { history.delete(it.text) }; renderPanel()
+                }.apply { isEnabled = selected?.stored == true })
                 row.addView(panelButton("全削除…") { panel = "clear"; renderPanel() })
                 view.addView(row)
-                if (entries.isEmpty()) item("履歴なし") { }
+                if (historyRows.isEmpty()) item("履歴なし") { }
             }
         }
+
         item("閉じる") { voice.cancel(); panel = ""; renderPanel() }
     }
 

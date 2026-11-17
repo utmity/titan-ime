@@ -64,10 +64,7 @@ class ClipboardIntegrationTest {
             }
             waitFor { history.entries().any { it.text == token } }
             key(KeyEvent.KEYCODE_V, KeyEvent.META_FUNCTION_ON)
-            // Select the temporary entry by its persisted list position, including pins.
-            val index = history.entries().indexOfFirst { it.text == token }
-            assertTrue(index >= 0)
-            repeat(index) { key(KeyEvent.KEYCODE_J, KeyEvent.META_FUNCTION_ON) }
+            // The current clipboard is first, even when pinned saved entries exist.
             key(KeyEvent.KEYCODE_ENTER)
             fun contains(node: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
                 if (node == null) return false
@@ -81,6 +78,49 @@ class ClipboardIntegrationTest {
             secret.description.extras = android.os.PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
             instrumentation.runOnMainSync { clipboard.setPrimaryClip(secret) }
             Thread.sleep(300); assertFalse(history.entries().any { it.text == "$token-secret" })
+            // Opening/pasting the current clipboard also works with persistence off.
+            history.enabled = false
+            val unchanged = history.entries()
+            fun nodes(node: android.view.accessibility.AccessibilityNodeInfo?): List<android.view.accessibility.AccessibilityNodeInfo> =
+                if (node == null) emptyList() else listOf(node) + (0 until node.childCount).flatMap { nodes(node.getChild(it)) }
+            val automation = instrumentation.uiAutomation
+            val flags = automation.serviceInfo.flags
+            automation.serviceInfo = automation.serviceInfo.apply {
+                this.flags = this.flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            }
+            try {
+                for ((raw, sensitive) in listOf(
+                    "  a\r\n\r\nb\n " to false,
+                    ("long-" + "x".repeat(600) + "\n end ") to false,
+                    "$token-masked" to true
+                )) {
+                    val editor = nodes(automation.rootInActiveWindow).first { it.className?.toString() == "android.widget.EditText" }
+                    assertTrue(editor.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT, android.os.Bundle().apply {
+                        putCharSequence(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "")
+                    }))
+                    instrumentation.waitForIdleSync()
+                    val current = ClipData.newPlainText("test", raw)
+                    if (sensitive) current.description.extras = android.os.PersistableBundle().apply {
+                        putBoolean("android.content.extra.IS_SENSITIVE", true)
+                    }
+                    instrumentation.runOnMainSync { clipboard.setPrimaryClip(current) }
+                    key(KeyEvent.KEYCODE_V, KeyEvent.META_FUNCTION_ON)
+                    fun panelNodes() = automation.windows.filter { it.root?.packageName?.toString() == context.packageName }.flatMap { nodes(it.root) }
+                    waitFor { panelNodes().any { it.text?.toString()?.contains("現在のクリップボード · ") == true } }
+                    val preview = panelNodes().first { it.text?.toString()?.contains("現在のクリップボード · ") == true }.text.toString()
+                    if (sensitive) {
+                        assertTrue(preview.contains("内容を非表示"))
+                        assertFalse(panelNodes().any { it.text?.toString()?.contains(raw) == true || it.contentDescription?.toString()?.contains(raw) == true })
+                    } else if (raw.length > 120) assertTrue(preview.endsWith("…"))
+                    else { assertTrue(preview.contains("[4行]")); assertTrue(preview.contains("↵")) }
+                    key(KeyEvent.KEYCODE_ENTER)
+                    waitFor { nodes(automation.rootInActiveWindow).any {
+                        it.className?.toString() == "android.widget.EditText" && it.text?.toString() == raw
+                    } }
+                    assertEquals("Panel display and paste never auto-save", unchanged, history.entries())
+                }
+            } finally { automation.serviceInfo = automation.serviceInfo.apply { this.flags = flags } }
+
         } finally {
             history.enabled = false
             history.delete(token); history.delete("$token-secret")
